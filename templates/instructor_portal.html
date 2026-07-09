@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+
+{% block title %}MicroCheck | Instructor Portal{% endblock %}
+{% block header_title %}Instructor portal{% endblock %}
+
+{% block content %}
+<section class="card splash-hero portal-hero">
+  <div class="logo-lockup">
+    <div class="logo-mark">MC</div>
+    <div>
+      <p class="section-label">Instructor portal</p>
+      <h2>Create session</h2>
+      <p>Create a new live session.</p>
+    </div>
+  </div>
+</section>
+
+<section class="card panel portal-panel">
+  <a class="btn btn-primary portal-cta" href="/instructor/sessions/new">Create session</a>
+</section>
+{% endblock %}

@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+
+{% block title %}MicroCheck | Student Page{% endblock %}
+{% block header_title %}Student submission page{% endblock %}
+
+{% block content %}
+<section class="card hero-card student-hero">
+  <div class="card-copy">
+    <p class="section-label">Student view</p>
+    <h2>Join with a session code, move through the session questions, and submit your justification.</h2>
+    <p>
+      The first question in the instructor’s session loads here. If there are multiple questions, you can move to the next one on this page.
+    </p>
+  </div>
+</section>
+
+<section class="card panel student-panel">
+  <div class="panel-head">
+    <div>
+      <p class="section-label">Join session</p>
+      <h3>Find your question</h3>
+    </div>
+    <button id="load-question-btn" class="btn btn-ghost" type="button">Load question</button>
+  </div>
+
+  <form id="student-form" class="stack-form">
+    <div class="field-row">
+      <label>
+        <span>Session code</span>
+        <input id="student-session-code" type="text" maxlength="6" placeholder="ABC123" value="{{ initial_session_code }}" />
+      </label>
+      <label>
+        <span>Student ID</span>
+        <input id="student-id" type="text" placeholder="S12345" />
+      </label>
+    </div>
+
+    <div class="question-card">
+      <p class="summary-label">Question</p>
+      <div id="question-display" class="question-display empty-copy">
+        Enter a session code and load the questions.
+      </div>
+      <div class="question-nav">
+        <span id="question-counter" class="question-counter"></span>
+      </div>
+    </div>
+
+    <label>
+      <span>Answer</span>
+      <input id="answer-input" type="text" placeholder="Type your short answer" disabled />
+    </label>
+
+    <label>
+      <span>Justification</span>
+      <textarea id="justification-input" rows="5" placeholder="Explain why you chose this answer" disabled></textarea>
+    </label>
+
+    <button id="submit-response-btn" class="btn btn-primary" type="submit" disabled>Submit response</button>
+  </form>
+
+  <p id="student-message" class="status-text"></p>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/student.js') }}"></script>
+{% endblock %}

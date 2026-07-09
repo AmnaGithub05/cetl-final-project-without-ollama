@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+
+{% block title %}MicroCheck | Create Session{% endblock %}
+{% block header_title %}Create a session{% endblock %}
+
+{% block content %}
+<section class="card hero-card">
+  <div class="card-copy">
+    <p class="section-label">Step 1</p>
+    <h2>Create the session code first, then open the session to add questions.</h2>
+    <p>
+      This page creates the shell for the session. After it is generated, you can manage multiple questions inside the session itself.
+    </p>
+  </div>
+  <div class="card-badge">
+    <span>Session</span>
+    <strong>New</strong>
+  </div>
+</section>
+
+<section class="card panel create-session-panel">
+  <div class="panel-head">
+    <div>
+      <p class="section-label">Session creation</p>
+      <h3>Generate a session code</h3>
+    </div>
+  </div>
+
+  <form id="create-session-form" class="stack-form">
+    <p class="panel-copy">
+      Create the session here, then you will be taken to the session page where questions can be added one by one.
+    </p>
+    <button type="submit" class="btn btn-primary">Create session</button>
+  </form>
+
+  <div class="session-summary">
+    <div>
+      <p class="summary-label">Generated session code</p>
+      <div id="session-code" class="code-pill">------</div>
+    </div>
+    <div>
+      <p class="summary-label">Next step</p>
+      <div class="metric">Manage questions</div>
+    </div>
+  </div>
+
+  <p id="dashboard-message" class="status-text"></p>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/session-create.js') }}"></script>
+{% endblock %}

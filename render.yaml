@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: microcheck
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: MICROCHECK_SECRET_KEY
+        generateValue: true
+      - key: MICROCHECK_DB_PATH
+        value: /var/data/microcheck.db
+    disk:
+      name: microcheck-data
+      mountPath: /var/data
+      sizeGB: 1

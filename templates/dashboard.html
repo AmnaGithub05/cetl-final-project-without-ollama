@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+
+{% block title %}MicroCheck | Instructor Dashboard{% endblock %}
+{% block header_title %}Instructor dashboard{% endblock %}
+
+{% block content %}
+<section class="card hero-card">
+  <div class="card-copy">
+    <p class="section-label">Instructor workspace</p>
+    <h2>Create sessions on their own page, then add as many questions as you need.</h2>
+    <p>
+      The dashboard is now a control center. Create a session on the next page, open it, and manage multiple prompts inside that session.
+    </p>
+  </div>
+  <div class="card-badge">
+    <span>Instructor flow</span>
+    <strong>Split</strong>
+  </div>
+</section>
+
+<section class="grid-two">
+  <article class="card panel">
+    <div class="panel-head">
+      <div>
+        <p class="section-label">Session setup</p>
+        <h3>Open the creation page</h3>
+      </div>
+    </div>
+
+    <p class="panel-copy">
+      Start with a clean session page so the code is created first. Once the session exists, you can open it and add multiple questions inside the same workspace.
+    </p>
+    <a class="btn btn-primary" href="/instructor/sessions/new">Create a new session</a>
+  </article>
+
+  <article class="card panel">
+    <div class="panel-head">
+      <div>
+        <p class="section-label">Student access</p>
+        <h3>Share the code with students</h3>
+      </div>
+    </div>
+
+    <p class="panel-copy">
+      Students still join through the student page. After you add questions inside a session, the most recent question is the one students will load.
+    </p>
+    <a class="btn btn-ghost" href="/student">Open student page</a>
+  </article>
+</section>
+{% endblock %}

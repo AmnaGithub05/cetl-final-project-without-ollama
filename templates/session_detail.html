@@ -1,0 +1,127 @@
+{% extends 'base.html' %}
+
+{% block title %}MicroCheck | Session {{ session_code }}{% endblock %}
+{% block header_title %}Session {{ session_code }}{% endblock %}
+
+{% block content %}
+<div id="session-page" data-session-code="{{ session_code }}"></div>
+
+<section class="card hero-card session-hero">
+  <div class="card-copy">
+    <p class="section-label">Session workspace</p>
+    <h2>Manage questions inside this session and keep the student feed in sync.</h2>
+    <p>
+      Add multiple questions below. Students will load the latest question for this session when they join with the code.
+    </p>
+  </div>
+  <div class="card-badge">
+    <span>Session code</span>
+    <strong id="session-code">{{ session_code }}</strong>
+  </div>
+</section>
+
+<section class="card panel">
+  <div class="panel-head">
+    <div>
+      <p class="section-label">Share link</p>
+      <h3>Email-friendly student URL</h3>
+    </div>
+  </div>
+
+  <p class="panel-copy">
+    Send this link by email. It opens the splash screen with the session code already filled in, so it keeps working after a few days.
+  </p>
+  <div class="code-pill">
+    {{ url_for('splash_page', _external=True) }}?session_code={{ session_code }}
+  </div>
+  <div style="margin-top: 1rem;">
+    <a class="btn btn-primary" href="{{ url_for('splash_page', _external=True) }}?session_code={{ session_code }}" target="_blank" rel="noopener noreferrer">Open splash link</a>
+  </div>
+</section>
+
+<section class="grid-two session-grid">
+  <article class="card panel">
+    <div class="panel-head">
+      <div>
+        <p class="section-label">Question builder</p>
+        <h3>Add a new question</h3>
+      </div>
+      <a class="btn btn-ghost" href="/">Student page</a>
+    </div>
+
+    <form id="add-question-form" class="stack-form">
+      <label>
+        <span>Question text</span>
+        <textarea id="question-input" rows="5" placeholder="Example: Explain the difference between a web server and a database."></textarea>
+      </label>
+      <button type="submit" class="btn btn-primary">Add question</button>
+    </form>
+
+    <div class="session-summary">
+      <div>
+        <p class="summary-label">Total questions</p>
+        <div id="question-count" class="metric">0</div>
+      </div>
+      <div>
+        <p class="summary-label">Total responses</p>
+        <div id="total-responses" class="metric">0</div>
+      </div>
+    </div>
+
+    <p id="dashboard-message" class="status-text"></p>
+
+    <div class="question-card session-active-question">
+      <p class="summary-label">Latest question</p>
+      <div id="latest-question-display" class="question-display empty-copy">
+        No questions have been added yet.
+      </div>
+    </div>
+  </article>
+
+  <article class="card panel">
+    <div class="panel-head">
+      <div>
+        <p class="section-label">Question list</p>
+        <h3>Questions in this session</h3>
+      </div>
+      <button id="refresh-btn" class="btn btn-ghost" type="button">Refresh</button>
+    </div>
+
+    <div id="questions-list" class="question-list">
+      <div class="empty-state">No questions yet. Add the first one on the left.</div>
+    </div>
+  </article>
+</section>
+
+<section class="card panel panel-table session-responses-panel">
+  <div class="panel-head">
+    <div>
+      <p class="section-label">Live responses</p>
+      <h3>Student submissions across the session</h3>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Question</th>
+          <th>Student ID</th>
+          <th>Answer</th>
+          <th>Justification</th>
+          <th>Time</th>
+        </tr>
+      </thead>
+      <tbody id="responses-table-body">
+        <tr>
+          <td colspan="5" class="empty-state">No responses yet. Share the session code with students.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/session-detail.js') }}"></script>
+{% endblock %}

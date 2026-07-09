@@ -1,0 +1,99 @@
+{% extends 'base.html' %}
+
+{% block title %}MicroCheck | Admin Dashboard{% endblock %}
+{% block header_title %}Admin dashboard{% endblock %}
+
+{% block content %}
+<section class="card splash-hero portal-hero">
+  <div class="logo-lockup">
+    <div class="logo-mark">MC</div>
+    <div>
+      <p class="section-label">Admin view</p>
+      <h2>All sessions, questions, and answers in one place.</h2>
+      <p>Only Amna, Thangaval, and Hermela can see this workspace.</p>
+    </div>
+  </div>
+</section>
+
+<section class="grid-two session-grid">
+  <article class="card panel panel-table">
+    <div class="panel-head">
+      <div>
+        <p class="section-label">Sessions</p>
+        <h3>Created sessions</h3>
+      </div>
+      <a class="btn btn-ghost" href="/instructor/sessions/new">Create session</a>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Session</th>
+            <th>Creator</th>
+            <th>Questions</th>
+            <th>Responses</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody id="admin-sessions-body">
+          <tr><td colspan="5" class="empty-state">Loading sessions...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class="card panel panel-table">
+    <div class="panel-head">
+      <div>
+        <p class="section-label">Questions</p>
+        <h3>All questions</h3>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Session</th>
+            <th>Question</th>
+            <th>Responses</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody id="admin-questions-body">
+          <tr><td colspan="4" class="empty-state">Loading questions...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+
+<section class="card panel panel-table session-responses-panel">
+  <div class="panel-head">
+    <div>
+      <p class="section-label">Responses</p>
+      <h3>All answers submitted</h3>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Session</th>
+          <th>Student</th>
+          <th>Question</th>
+          <th>Answer</th>
+          <th>Justification</th>
+          <th>Time</th>
+        </tr>
+      </thead>
+      <tbody id="admin-responses-body">
+        <tr><td colspan="6" class="empty-state">Loading responses...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/instructor-admin.js') }}"></script>
+{% endblock %}
