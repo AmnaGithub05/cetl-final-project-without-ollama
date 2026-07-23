@@ -22,9 +22,18 @@ const latestQuestionType = document.getElementById('latest-question-type');
 const dashboardMessage = document.getElementById('dashboard-message');
 const questionsList = document.getElementById('questions-list');
 const responsesTableBody = document.getElementById('responses-table-body');
+const sessionQuestionPieCharts = document.getElementById('session-question-pie-charts');
+const sessionQuestionPieStatus = document.getElementById('session-question-pie-status');
+const sessionQuestionChartModal = document.getElementById('session-question-chart-modal');
+const sessionQuestionChartModalTitle = document.getElementById('session-question-chart-modal-title');
+const sessionQuestionChartModalMeta = document.getElementById('session-question-chart-modal-meta');
+const sessionQuestionChartModalPie = document.getElementById('session-question-chart-modal-pie');
+const sessionQuestionChartModalHover = document.getElementById('session-question-chart-modal-hover');
+const sessionQuestionChartModalLegend = document.getElementById('session-question-chart-modal-legend');
 const refreshBtn = document.getElementById('refresh-btn');
 
 let refreshTimer = null;
+let sessionQuestionChartGroups = [];
 
 function setMessage(text, type = '') {
   dashboardMessage.textContent = text;
@@ -58,6 +67,327 @@ function formatQuestionType(questionType) {
   };
 
   return labels[questionType] || 'Open ended';
+}
+
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+
+function normalizeAnswer(answer) {
+  return String(answer || '').trim().replace(/\s+/g, ' ');
+}
+
+
+function summarizeAnswer(answer, maxLength = 42) {
+  const normalized = normalizeAnswer(answer);
+  if (!normalized) {
+    return 'Blank answer';
+  }
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength - 1).trim()}…`;
+}
+
+
+function summarizeQuestion(questionText, maxLength = 90) {
+  const normalized = String(questionText || '').trim().replace(/\s+/g, ' ');
+  if (!normalized) {
+    return 'Question removed';
+  }
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength - 1).trim()}…`;
+}
+
+
+function getAnswerBuckets(responses, maxBuckets = 5) {
+  const counts = new Map();
+
+  (responses || []).forEach((response) => {
+    const answer = normalizeAnswer(response.answer);
+    const bucket = answer || 'Blank answer';
+    counts.set(bucket, (counts.get(bucket) || 0) + 1);
+  });
+
+  const sorted = Array.from(counts.entries()).sort((left, right) => right[1] - left[1]);
+  if (!sorted.length) {
+    return [];
+  }
+
+  if (sorted.length <= maxBuckets) {
+    return sorted.map(([label, count]) => ({ label, count }));
+  }
+
+  const topBuckets = sorted.slice(0, maxBuckets - 1).map(([label, count]) => ({ label, count }));
+  const otherCount = sorted.slice(maxBuckets - 1).reduce((total, [, count]) => total + count, 0);
+  return [...topBuckets, { label: 'Other', count: otherCount }];
+}
+
+
+function buildPieSlices(buckets) {
+  const total = buckets.reduce((sum, bucket) => sum + bucket.count, 0);
+  if (!total) {
+    return [];
+  }
+
+  const palette = ['#0f766e', '#f97316', '#2563eb', '#8b5cf6', '#ef4444'];
+  let cumulative = 0;
+
+  return buckets.map((bucket, index) => {
+    const startAngle = (cumulative / total) * Math.PI * 2 - Math.PI / 2;
+    cumulative += bucket.count;
+    const endAngle = (cumulative / total) * Math.PI * 2 - Math.PI / 2;
+
+    return {
+      ...bucket,
+      startAngle,
+      endAngle,
+      percent: (bucket.count / total) * 100,
+      color: palette[index % palette.length],
+    };
+  });
+}
+
+
+function polarToCartesian(centerX, centerY, radius, angle) {
+  return {
+    x: centerX + radius * Math.cos(angle),
+    y: centerY + radius * Math.sin(angle),
+  };
+}
+
+
+function describeSlicePath(centerX, centerY, radius, startAngle, endAngle) {
+  const start = polarToCartesian(centerX, centerY, radius, endAngle);
+  const end = polarToCartesian(centerX, centerY, radius, startAngle);
+  const largeArcFlag = endAngle - startAngle <= Math.PI ? '0' : '1';
+
+  return [
+    `M ${centerX} ${centerY}`,
+    `L ${end.x} ${end.y}`,
+    `A ${radius} ${radius} 0 ${largeArcFlag} 1 ${start.x} ${start.y}`,
+    'Z',
+  ].join(' ');
+}
+
+
+function buildQuestionResponseGroups(questions, responses) {
+  const responseBuckets = new Map();
+
+  (responses || []).forEach((response) => {
+    const questionId = response.question_id != null ? String(response.question_id) : '';
+    const key = questionId || `text:${normalizeAnswer(response.question_text) || 'removed'}`;
+    const existing = responseBuckets.get(key) || [];
+    existing.push(response);
+    responseBuckets.set(key, existing);
+  });
+
+  return (questions || [])
+    .map((question) => ({
+      questionId: String(question.id),
+      questionText: question.question_text,
+      questionType: question.question_type || 'open_ended',
+      sessionCode: question.session_code || '',
+      responses: responseBuckets.get(String(question.id)) || [],
+    }))
+    .sort((left, right) => right.responses.length - left.responses.length);
+}
+
+
+function renderSessionQuestionCharts(questions, responses) {
+  if (!sessionQuestionPieCharts) {
+    return;
+  }
+
+  const allGroups = buildQuestionResponseGroups(questions, responses);
+  const groups = allGroups.slice(0, 20);
+  sessionQuestionChartGroups = groups;
+
+  if (!groups.length) {
+    sessionQuestionPieCharts.innerHTML = '<div class="empty-state analytics-empty">No question responses yet.</div>';
+    if (sessionQuestionPieStatus) {
+      sessionQuestionPieStatus.textContent = '';
+    }
+    return;
+  }
+
+  if (sessionQuestionPieStatus) {
+    sessionQuestionPieStatus.textContent = groups.length < allGroups.length
+      ? 'Showing the top 20 questions with submitted answers.'
+      : `Showing ${groups.length} question chart${groups.length === 1 ? '' : 's'}.`;
+  }
+
+  sessionQuestionPieCharts.innerHTML = groups
+    .map((group, index) => {
+      const buckets = getAnswerBuckets(group.responses, 5);
+      const slices = buildPieSlices(buckets);
+      const total = group.responses.length;
+      const chartSummary = summarizeQuestion(group.questionText);
+
+      const chartMarkup = slices.length
+        ? [
+            `<circle cx="120" cy="120" r="86" fill="#f8fafc" stroke="rgba(15, 118, 110, 0.12)" stroke-width="1"></circle>`,
+            ...slices.map((slice) => `
+              <path d="${describeSlicePath(120, 120, 86, slice.startAngle, slice.endAngle)}" fill="${slice.color}" data-answer-label="${escapeHtml(slice.label)}" data-answer-count="${slice.count}" data-answer-percent="${slice.percent.toFixed(1)}" title="${escapeHtml(slice.label)}"></path>
+            `),
+            `<circle cx="120" cy="120" r="46" fill="#ffffff"></circle>`,
+            `<text x="120" y="114" text-anchor="middle" fill="#172033" font-size="18" font-weight="800">${total}</text>`,
+            `<text x="120" y="133" text-anchor="middle" fill="#667085" font-size="11">total answers</text>`,
+          ].join('')
+        : '<text x="120" y="120" text-anchor="middle" fill="#667085" font-size="14">No answers yet</text>';
+
+      return `
+        <article class="card panel question-chart-card">
+          <div class="question-chart-head">
+            <div>
+              <p class="section-label">Question ${index + 1}</p>
+              <h3>${chartSummary}</h3>
+              <p class="question-chart-meta">${formatQuestionType(group.questionType)} · ${total} answers${group.sessionCode ? ` · ${group.sessionCode}` : ''}</p>
+            </div>
+          </div>
+          <div class="question-chart-layout">
+            <button class="question-chart-toggle" type="button" data-session-question-chart-toggle data-question-id="${escapeHtml(group.questionId)}" data-question-title="${escapeHtml(chartSummary)}">
+              <svg class="pie-chart" viewBox="0 0 240 240" role="img" aria-label="Pie chart for ${chartSummary}">${chartMarkup}</svg>
+              <span class="question-chart-hint">Click chart to view answers</span>
+            </button>
+          </div>
+        </article>
+      `;
+    })
+    .join('');
+}
+
+
+function renderSessionQuestionChartModal(group) {
+  if (!sessionQuestionChartModal || !sessionQuestionChartModalTitle || !sessionQuestionChartModalMeta || !sessionQuestionChartModalPie || !sessionQuestionChartModalHover || !sessionQuestionChartModalLegend) {
+    return;
+  }
+
+  const total = group.responses.length;
+  const buckets = getAnswerBuckets(group.responses, 5);
+  const slices = buildPieSlices(buckets);
+  const chartSummary = summarizeQuestion(group.questionText);
+
+  sessionQuestionChartModalTitle.textContent = chartSummary;
+  sessionQuestionChartModalMeta.textContent = `${formatQuestionType(group.questionType)} · ${total} answers${group.sessionCode ? ` · ${group.sessionCode}` : ''}`;
+  sessionQuestionChartModalPie.innerHTML = slices.length
+    ? [
+        `<circle cx="120" cy="120" r="86" fill="#f8fafc" stroke="rgba(15, 118, 110, 0.12)" stroke-width="1"></circle>`,
+        ...slices.map((slice) => `
+          <path d="${describeSlicePath(120, 120, 86, slice.startAngle, slice.endAngle)}" fill="${slice.color}" data-answer-label="${escapeHtml(slice.label)}" data-answer-count="${slice.count}" data-answer-percent="${slice.percent.toFixed(1)}" title="${escapeHtml(slice.label)}"></path>
+        `),
+        `<circle cx="120" cy="120" r="46" fill="#ffffff"></circle>`,
+        `<text x="120" y="114" text-anchor="middle" fill="#172033" font-size="18" font-weight="800">${total}</text>`,
+        `<text x="120" y="133" text-anchor="middle" fill="#667085" font-size="11">total answers</text>`,
+      ].join('')
+    : '<text x="120" y="120" text-anchor="middle" fill="#667085" font-size="14">No answers yet</text>';
+
+  sessionQuestionChartModalHover.innerHTML = '<div class="question-chart-hover-label">Hover or click a color to see the answer.</div><div class="question-chart-hover-meta">Move over a slice or swatch to inspect it.</div>';
+  sessionQuestionChartModalLegend.innerHTML = slices.length
+    ? slices.map((slice) => `
+        <button type="button" class="chart-legend-item chart-legend-button" data-answer-label="${escapeHtml(slice.label)}" data-answer-count="${slice.count}" data-answer-percent="${slice.percent.toFixed(1)}" title="${escapeHtml(slice.label)}">
+          <span class="chart-legend-swatch" style="background:${slice.color}"></span>
+          <div>
+            <div class="chart-legend-label">${summarizeAnswer(slice.label)}</div>
+            <div class="chart-legend-meta">${slice.count} answers · ${slice.percent.toFixed(1)}%</div>
+          </div>
+        </button>
+      `).join('')
+    : '<div class="empty-state">No answers submitted yet.</div>';
+
+  sessionQuestionChartModal.classList.remove('hidden');
+  sessionQuestionChartModal.setAttribute('aria-hidden', 'false');
+}
+
+
+function closeSessionQuestionChartModal() {
+  if (!sessionQuestionChartModal) {
+    return;
+  }
+
+  sessionQuestionChartModal.classList.add('hidden');
+  sessionQuestionChartModal.setAttribute('aria-hidden', 'true');
+}
+
+
+function toggleSessionQuestionChartMinimize() {
+  const panel = sessionQuestionChartModal?.querySelector('.question-chart-modal-panel');
+  const button = sessionQuestionChartModal?.querySelector('[data-session-question-chart-minimize]');
+  if (!panel || !button) {
+    return;
+  }
+
+  const isMinimized = panel.classList.toggle('is-minimized');
+  button.setAttribute('aria-pressed', String(isMinimized));
+  button.setAttribute('aria-label', isMinimized ? 'Restore answers popup' : 'Minimize answers popup');
+  button.textContent = isMinimized ? '▢' : '×';
+}
+
+
+if (sessionQuestionPieCharts) {
+  sessionQuestionPieCharts.addEventListener('click', (event) => {
+    const toggleButton = event.target.closest('[data-session-question-chart-toggle]');
+    if (toggleButton) {
+      const questionId = toggleButton.getAttribute('data-question-id');
+      const group = sessionQuestionChartGroups.find((item) => String(item.questionId) === String(questionId));
+      if (group) {
+        renderSessionQuestionChartModal(group);
+      }
+    }
+  });
+}
+
+if (sessionQuestionChartModal) {
+  sessionQuestionChartModal.addEventListener('click', (event) => {
+    if (event.target.closest('[data-session-question-chart-close]')) {
+      closeSessionQuestionChartModal();
+      return;
+    }
+
+    if (event.target.closest('[data-session-question-chart-minimize]')) {
+      toggleSessionQuestionChartMinimize();
+      return;
+    }
+
+    const answerTarget = event.target.closest('[data-answer-label]');
+    if (answerTarget) {
+      sessionQuestionChartModalHover.innerHTML = `
+        <div class="question-chart-hover-label">${escapeHtml(answerTarget.getAttribute('data-answer-label') || 'Blank answer')}</div>
+        <div class="question-chart-hover-meta">${answerTarget.getAttribute('data-answer-count') || '0'} answers · ${answerTarget.getAttribute('data-answer-percent') || '0.0'}%</div>
+      `;
+    }
+  });
+
+  sessionQuestionChartModal.addEventListener('mouseover', (event) => {
+    const answerTarget = event.target.closest('[data-answer-label]');
+    if (!answerTarget) {
+      return;
+    }
+
+    sessionQuestionChartModalHover.innerHTML = `
+      <div class="question-chart-hover-label">${escapeHtml(answerTarget.getAttribute('data-answer-label') || 'Blank answer')}</div>
+      <div class="question-chart-hover-meta">${answerTarget.getAttribute('data-answer-count') || '0'} answers · ${answerTarget.getAttribute('data-answer-percent') || '0.0'}%</div>
+    `;
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && sessionQuestionChartModal && !sessionQuestionChartModal.classList.contains('hidden')) {
+      closeSessionQuestionChartModal();
+    }
+  });
 }
 
 
@@ -222,6 +552,7 @@ async function loadSessionData() {
     totalResponsesEl.textContent = responsesData.total_responses;
     renderQuestions(questionsData.questions);
     renderResponses(responsesData.responses);
+    renderSessionQuestionCharts(questionsData.questions, responsesData.responses);
   } catch (error) {
     setMessage(error.message, 'error');
   }

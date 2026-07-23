@@ -182,6 +182,34 @@
     </table>
   </div>
 </section>
+
+<section class="card panel heatmap-card">
+  <div class="panel-head">
+    <div>
+      <p class="section-label">Analytics</p>
+      <h3>Pie charts of answers submitted</h3>
+    </div>
+  </div>
+  <div id="session-question-pie-charts" class="chart-grid"></div>
+  <p id="session-question-pie-status" class="status-text"></p>
+</section>
+
+<div id="session-question-chart-modal" class="question-chart-modal hidden" aria-hidden="true">
+  <div class="question-chart-modal-backdrop" data-session-question-chart-close></div>
+  <div class="question-chart-modal-panel" role="dialog" aria-modal="true" aria-labelledby="session-question-chart-modal-title">
+    <button class="question-chart-modal-minimize" type="button" aria-label="Minimize answers popup" data-session-question-chart-minimize aria-pressed="false">×</button>
+    <div class="question-chart-modal-head">
+      <p class="section-label">Answers popup</p>
+      <h3 id="session-question-chart-modal-title"></h3>
+      <p class="question-chart-meta" id="session-question-chart-modal-meta"></p>
+    </div>
+    <div class="question-chart-modal-body">
+      <svg id="session-question-chart-modal-pie" class="question-chart-modal-pie" viewBox="0 0 240 240" role="img" aria-label="Question answer pie chart"></svg>
+      <div class="chart-legend" id="session-question-chart-modal-legend"></div>
+    </div>
+    <div class="question-chart-modal-hover" id="session-question-chart-modal-hover">Click a pie chart to see answers.</div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
