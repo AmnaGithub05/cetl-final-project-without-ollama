@@ -55,17 +55,49 @@
           <tr>
             <th>Session</th>
             <th>Question</th>
+            <th>Type</th>
             <th>Responses</th>
             <th>Created</th>
+            <th>Action</th>
           </tr>
         </thead>
         <tbody id="admin-questions-body">
-          <tr><td colspan="4" class="empty-state">Loading questions...</td></tr>
+          <tr><td colspan="6" class="empty-state">Loading questions...</td></tr>
         </tbody>
       </table>
     </div>
   </article>
 </section>
+
+<section class="card panel heatmap-card">
+  <div class="panel-head">
+    <div>
+      <p class="section-label">Analytics</p>
+      <h3>Pie charts of answers submitted</h3>
+    </div>
+    <button id="reset-data-btn" class="btn btn-danger" type="button">Reset all data</button>
+  </div>
+  <div id="question-pie-charts" class="chart-grid"></div>
+  <p id="question-pie-status" class="status-text"></p>
+  <p id="reset-data-message" class="status-text"></p>
+</section>
+
+<div id="question-chart-modal" class="question-chart-modal hidden" aria-hidden="true">
+  <div class="question-chart-modal-backdrop" data-question-chart-close></div>
+  <div class="question-chart-modal-panel" role="dialog" aria-modal="true" aria-labelledby="question-chart-modal-title">
+    <button class="question-chart-modal-minimize" type="button" aria-label="Minimize answers popup" data-question-chart-minimize aria-pressed="false">×</button>
+    <div class="question-chart-modal-head">
+      <p class="section-label">Answers popup</p>
+      <h3 id="question-chart-modal-title"></h3>
+      <p class="question-chart-meta" id="question-chart-modal-meta"></p>
+    </div>
+    <div class="question-chart-modal-body">
+      <svg id="question-chart-modal-pie" class="question-chart-modal-pie" viewBox="0 0 240 240" role="img" aria-label="Question answer pie chart"></svg>
+      <div class="chart-legend" id="question-chart-modal-legend"></div>
+    </div>
+    <div class="question-chart-modal-hover" id="question-chart-modal-hover">Click a pie chart to see answers.</div>
+  </div>
+</div>
 
 <section class="card panel panel-table session-responses-panel">
   <div class="panel-head">
@@ -79,6 +111,7 @@
       <thead>
         <tr>
           <th>Session</th>
+          <th>Type</th>
           <th>Student</th>
           <th>Question</th>
           <th>Answer</th>
@@ -87,7 +120,7 @@
         </tr>
       </thead>
       <tbody id="admin-responses-body">
-        <tr><td colspan="6" class="empty-state">Loading responses...</td></tr>
+        <tr><td colspan="7" class="empty-state">Loading responses...</td></tr>
       </tbody>
     </table>
   </div>

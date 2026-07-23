@@ -40,20 +40,29 @@
       <div id="question-display" class="question-display empty-copy">
         Enter a session code and load the questions.
       </div>
+      <div id="question-type-display" class="question-type-pill hidden"></div>
+      <div id="question-options-display" class="question-options-preview hidden"></div>
       <div class="question-nav">
         <span id="question-counter" class="question-counter"></span>
       </div>
     </div>
 
-    <label>
-      <span>Answer</span>
-      <input id="answer-input" type="text" placeholder="Type your short answer" disabled />
-    </label>
+    <div id="mcq-answer-panel" class="mcq-answer-panel hidden">
+      <span class="summary-label">Select one answer</span>
+      <div id="mcq-answer-options" class="mcq-answer-options"></div>
+    </div>
 
-    <label>
-      <span>Justification</span>
-      <textarea id="justification-input" rows="5" placeholder="Explain why you chose this answer" disabled></textarea>
-    </label>
+    <div id="manual-response-fields">
+      <label>
+        <span>Answer</span>
+        <input id="answer-input" type="text" placeholder="Type your short answer" disabled />
+      </label>
+
+      <label>
+        <span>Justification</span>
+        <textarea id="justification-input" rows="5" placeholder="Explain why you chose this answer" disabled></textarea>
+      </label>
+    </div>
 
     <button id="submit-response-btn" class="btn btn-primary" type="submit" disabled>Submit response</button>
   </form>

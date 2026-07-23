@@ -39,6 +39,32 @@
   </div>
 </section>
 
+<section class="card panel">
+  <div class="panel-head">
+    <div>
+      <p class="section-label">Auto-generate</p>
+      <h3>Upload a lecture file with AI</h3>
+    </div>
+  </div>
+
+  <form id="import-questions-form" class="stack-form">
+    <p class="panel-copy">
+      Upload a lecture file and AI will generate a mix of MCQ and open-ended questions from it.
+    </p>
+    <label>
+      <span>Lecture file</span>
+      <input id="lecture-file-input" type="file" />
+    </label>
+    <label>
+      <span>Number of questions</span>
+      <input id="question-count-input" type="number" min="1" max="20" value="10" />
+    </label>
+    <button type="submit" class="btn btn-primary">Generate questions from file</button>
+  </form>
+
+  <p id="import-message" class="status-text"></p>
+</section>
+
 <section class="grid-two session-grid">
   <article class="card panel">
     <div class="panel-head">
@@ -51,9 +77,42 @@
 
     <form id="add-question-form" class="stack-form">
       <label>
+        <span>Question type</span>
+        <select id="question-type-input">
+          <option value="mcq">Multiple choice (MCQ)</option>
+          <option value="open_ended" selected>Open ended</option>
+          <option value="short_answer">Short answer</option>
+        </select>
+      </label>
+      <label>
         <span>Question text</span>
         <textarea id="question-input" rows="5" placeholder="Example: Explain the difference between a web server and a database."></textarea>
       </label>
+
+      <div id="mcq-options-panel" class="mcq-options-panel hidden">
+        <div class="panel-copy mcq-options-copy">
+          Add at least two choices for the multiple-choice question.
+        </div>
+        <div class="mcq-options-grid">
+          <label>
+            <span>Option 1</span>
+            <input id="mcq-option-1" type="text" placeholder="First choice" />
+          </label>
+          <label>
+            <span>Option 2</span>
+            <input id="mcq-option-2" type="text" placeholder="Second choice" />
+          </label>
+          <label>
+            <span>Option 3</span>
+            <input id="mcq-option-3" type="text" placeholder="Third choice" />
+          </label>
+          <label>
+            <span>Option 4</span>
+            <input id="mcq-option-4" type="text" placeholder="Fourth choice" />
+          </label>
+        </div>
+      </div>
+
       <button type="submit" class="btn btn-primary">Add question</button>
     </form>
 
@@ -75,6 +134,8 @@
       <div id="latest-question-display" class="question-display empty-copy">
         No questions have been added yet.
       </div>
+      <div id="latest-question-type" class="question-type-pill hidden"></div>
+      <div id="latest-question-options" class="question-options-preview hidden"></div>
     </div>
   </article>
 
@@ -106,6 +167,7 @@
       <thead>
         <tr>
           <th>Question</th>
+          <th>Type</th>
           <th>Student ID</th>
           <th>Answer</th>
           <th>Justification</th>

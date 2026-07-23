@@ -1,11 +1,16 @@
 const sessionCodeInput = document.getElementById('student-session-code');
 const studentIdInput = document.getElementById('student-id');
 const questionDisplay = document.getElementById('question-display');
+const mcqAnswerPanel = document.getElementById('mcq-answer-panel');
+const mcqAnswerOptions = document.getElementById('mcq-answer-options');
+const manualResponseFields = document.getElementById('manual-response-fields');
 const answerInput = document.getElementById('answer-input');
 const justificationInput = document.getElementById('justification-input');
 const submitBtn = document.getElementById('submit-response-btn');
 const loadQuestionBtn = document.getElementById('load-question-btn');
 const questionCounter = document.getElementById('question-counter');
+const questionTypeDisplay = document.getElementById('question-type-display');
+const questionOptionsDisplay = document.getElementById('question-options-display');
 const studentMessage = document.getElementById('student-message');
 const studentForm = document.getElementById('student-form');
 const STUDENT_ID_STORAGE_KEY = 'microcheck-student-id';
@@ -15,6 +20,7 @@ let loadedSessionCode = '';
 let loadedQuestionId = null;
 let loadedQuestions = [];
 let currentQuestionIndex = 0;
+let loadedQuestionType = '';
 
 function getSessionCodeFromUrl() {
   const params = new URLSearchParams(window.location.search);
@@ -30,6 +36,105 @@ function setAnswerFieldsEnabled(enabled) {
   answerInput.disabled = !enabled;
   justificationInput.disabled = !enabled;
   submitBtn.disabled = !enabled;
+}
+
+
+function setManualResponseVisibility(questionType) {
+  const isMcq = questionType === 'mcq';
+  manualResponseFields.classList.toggle('hidden', isMcq);
+
+  if (isMcq) {
+    answerInput.value = '';
+    justificationInput.value = '';
+  }
+}
+
+
+function clearSelectedMcqAnswer() {
+  const selected = mcqAnswerOptions.querySelector('input[type="radio"]:checked');
+  if (selected) {
+    selected.checked = false;
+  }
+}
+
+
+function formatQuestionType(questionType) {
+  const labels = {
+    mcq: 'Multiple choice',
+    open_ended: 'Open ended',
+    short_answer: 'Short answer',
+  };
+
+  return labels[questionType] || '';
+}
+
+
+function normalizeOptions(options) {
+  return (options || [])
+    .map((option) => {
+      if (option && typeof option === 'object') {
+        return String(option.option_text || '').trim();
+      }
+
+      return String(option).trim();
+    })
+    .filter(Boolean);
+}
+
+
+function getSelectedMcqAnswer() {
+  const selected = mcqAnswerOptions.querySelector('input[type="radio"]:checked');
+  return selected ? selected.value : '';
+}
+
+
+function renderQuestionExtras(question) {
+  const questionType = question?.question_type || '';
+  const options = normalizeOptions(question?.options);
+  loadedQuestionType = questionType;
+
+  if (!questionType) {
+    questionTypeDisplay.textContent = '';
+    questionTypeDisplay.className = 'question-type-pill hidden';
+    questionOptionsDisplay.textContent = '';
+    questionOptionsDisplay.className = 'question-options-preview hidden';
+    mcqAnswerPanel.classList.add('hidden');
+    mcqAnswerOptions.innerHTML = '';
+    manualResponseFields.classList.remove('hidden');
+    return;
+  }
+
+  questionTypeDisplay.textContent = formatQuestionType(questionType);
+  questionTypeDisplay.className = 'question-type-pill';
+
+  if (questionType === 'mcq' && options.length) {
+    questionOptionsDisplay.innerHTML = `
+      <p class="question-options-label">Options</p>
+      <ul class="mcq-option-list">
+        ${options.map((option) => `<li>${option}</li>`).join('')}
+      </ul>
+    `;
+    questionOptionsDisplay.className = 'question-options-preview';
+    mcqAnswerPanel.classList.remove('hidden');
+    setManualResponseVisibility('mcq');
+    mcqAnswerOptions.innerHTML = options
+      .map(
+        (option, index) => `
+          <label class="mcq-answer-option">
+            <input type="radio" name="mcq-answer" value="${option}" />
+            <span>${String.fromCharCode(65 + index)}. ${option}</span>
+          </label>
+        `,
+      )
+      .join('');
+    return;
+  }
+
+  questionOptionsDisplay.textContent = '';
+  questionOptionsDisplay.className = 'question-options-preview hidden';
+  mcqAnswerPanel.classList.add('hidden');
+  mcqAnswerOptions.innerHTML = '';
+  setManualResponseVisibility(questionType);
 }
 
 
@@ -92,6 +197,7 @@ function showQuestion(index) {
     loadedQuestionId = null;
     questionDisplay.textContent = 'This session does not have any questions yet.';
     questionDisplay.className = 'question-display empty-copy';
+    renderQuestionExtras(null);
     setAnswerFieldsEnabled(false);
     updateQuestionControls();
     return;
@@ -103,6 +209,10 @@ function showQuestion(index) {
   loadedQuestionId = question.id;
   questionDisplay.textContent = question.question_text;
   questionDisplay.className = 'question-display';
+  renderQuestionExtras(question);
+  clearSelectedMcqAnswer();
+  answerInput.value = '';
+  setManualResponseVisibility(question.question_type);
   setAnswerFieldsEnabled(true);
   updateQuestionControls();
 }
@@ -110,11 +220,16 @@ function showQuestion(index) {
 function resetQuestionState(message) {
   questionDisplay.textContent = message;
   questionDisplay.className = 'question-display empty-copy';
+  renderQuestionExtras(null);
   loadedSessionCode = '';
   loadedQuestionId = null;
   loadedQuestions = [];
   currentQuestionIndex = 0;
+  loadedQuestionType = '';
   questionCounter.textContent = '';
+  mcqAnswerPanel.classList.add('hidden');
+  mcqAnswerOptions.innerHTML = '';
+  manualResponseFields.classList.remove('hidden');
   setAnswerFieldsEnabled(false);
 }
 
@@ -188,15 +303,16 @@ studentForm.addEventListener('submit', async (event) => {
 
   const sessionCode = loadedSessionCode || sessionCodeInput.value.trim().toUpperCase();
   const studentId = studentIdInput.value.trim();
-  const answer = answerInput.value.trim();
-  const justification = justificationInput.value.trim();
+  const isMcq = loadedQuestionType === 'mcq';
+  const answer = isMcq ? getSelectedMcqAnswer() : answerInput.value.trim();
+  const justification = isMcq ? '' : justificationInput.value.trim();
 
   if (!sessionCode) {
     setMessage('Load a session first.', 'error');
     return;
   }
 
-  if (!studentId || !answer || !justification) {
+  if (!studentId || !answer || (!isMcq && !justification)) {
     setMessage('Please complete every field before submitting.', 'error');
     return;
   }
