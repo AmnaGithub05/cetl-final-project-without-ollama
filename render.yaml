@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: microcheck
+    name: 2026-summer-project
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app

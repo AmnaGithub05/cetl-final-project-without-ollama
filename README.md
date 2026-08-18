@@ -1,11 +1,11 @@
-# MicroCheck
+# 2026 Summer Project
 
-MicroCheck is a simple Phase 1 classroom response prototype built with Flask, SQLite, HTML, CSS, and JavaScript.
+2026 Summer Project is a simple Phase 1 classroom response prototype built with Flask, SQLite, HTML, CSS, and JavaScript.
 
 ## Folder structure
 
 ```text
-MicroCheck/
+2026-summer-project/
 ├── app.py
 ├── microcheck.db               # created automatically on first run
 ├── requirements.txt
@@ -52,7 +52,7 @@ MicroCheck/
 
 ## Run in VS Code
 
-1. Open the folder `MicroCheck` in VS Code.
+1. Open the project folder in VS Code.
 2. Create a virtual environment:
    - Windows PowerShell: `python -m venv .venv`
 3. Activate it:
