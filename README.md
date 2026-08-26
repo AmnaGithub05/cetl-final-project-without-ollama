@@ -1,11 +1,11 @@
-# 2026 Summer Project
+# MicroCheck
 
-2026 Summer Project is a simple Phase 1 classroom response prototype built with Flask, SQLite, HTML, CSS, and JavaScript.
+MicroCheck is a classroom response application built with Flask, SQLite, HTML, CSS, and JavaScript.
 
 ## Folder structure
 
 ```text
-2026-summer-project/
+microcheck/
 ├── app.py
 ├── microcheck.db               # created automatically on first run
 ├── requirements.txt
