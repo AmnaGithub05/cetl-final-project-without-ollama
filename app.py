@@ -331,12 +331,12 @@ def generate_questions_from_text(text: str, max_questions: int = 20) -> list[str
     for paragraph in paragraphs:
         snippet = summarize_snippet(paragraph)
         if snippet:
-            candidates.append(f'What is the main idea of this section: {snippet}?')
+            candidates.append(f'What conclusion can be logically drawn from this section, and which detail best supports it: {snippet}?')
 
     for sentence in sentences:
         snippet = summarize_snippet(sentence)
         if snippet:
-            candidates.append(f'Explain the concept described here: {snippet}?')
+            candidates.append(f'If the situation described here changed, what outcome would you predict and why: {snippet}?')
 
     unique_questions = []
     seen = set()
@@ -349,7 +349,7 @@ def generate_questions_from_text(text: str, max_questions: int = 20) -> list[str
             break
 
     if not unique_questions and text.strip():
-        unique_questions.append('What are the key ideas presented in the uploaded material?')
+        unique_questions.append('What claim does the material support, what evidence supports it, and what assumption connects the evidence to the claim?')
 
     return unique_questions
 
@@ -415,10 +415,14 @@ def generate_questions_with_ai(text: str, max_questions: int = 10) -> list[dict]
 
     try:
         question_parsed = slm.generate_json(
-            f"""Generate exactly {max_questions} classroom questions from the lecture material below.
+            f"""Generate exactly {max_questions} rigorous classroom questions from the lecture material below.
 Return ONLY valid JSON in this shape:
 {{"questions":[{{"question_type":"mcq","question_text":"...","options":["...","...","...","..."]}},{{"question_type":"open_ended","question_text":"...","options":[]}}]}}
-Use a mix of MCQ and open-ended questions. MCQs must have exactly four distinct options. Test understanding, application, comparison, and explanation. Do not copy long passages.
+Use a mix of MCQ and open-ended questions, with roughly half of each. These must be logical reasoning questions, not vocabulary or surface-level recall.
+Every question must require the student to connect at least two ideas, infer a consequence, apply a principle to a new situation, compare alternatives, evaluate evidence, identify an assumption, diagnose an error, or predict an outcome.
+Prefer question stems such as: "What would most likely happen if... and why?", "Which conclusion is best supported by...", "How would changing X affect Y?", "Which explanation accounts for both...", or "What assumption is necessary for...?"
+For MCQs, make the distractors plausible reasoning errors, use exactly four distinct options, and make only one option defensibly correct from the material. Do not ask "What is...", "Define...", or "What is the main idea..." unless the question also requires reasoning. Do not copy long passages.
+Open-ended questions must ask for a chain of reasoning or evidence, not a one-word answer.
 
 LECTURE MATERIAL:
 {cleaned_text[:40000]}""",
