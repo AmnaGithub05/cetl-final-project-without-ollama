@@ -69,7 +69,9 @@
 ## Notes
 
 - The database file `microcheck.db` is created automatically in the project root.
-- This is a Phase 1 prototype with no AI features yet.
+- AI question generation and misconception detection use a private local Ollama service.
+- The default model is `llama3.2:1b`; set `OLLAMA_HOST`, `OLLAMA_MODEL`, and optionally `OLLAMA_TIMEOUT` to configure it.
+- Start Ollama separately and run `ollama pull llama3.2:1b` before using AI features. Student data is sent to the configured Ollama host only.
 
 ## Permanent Deployment
 

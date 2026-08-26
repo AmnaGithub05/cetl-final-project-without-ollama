@@ -638,11 +638,14 @@ textarea:disabled {
 }
 
 .table-wrap {
+  min-width: 0;
   overflow-x: auto;
+  max-width: 100%;
 }
 
 table {
   width: 100%;
+  max-width: 100%;
   border-collapse: collapse;
 }
 
@@ -664,6 +667,7 @@ th {
 td {
   font-size: 0.96rem;
   line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 
 .panel-table {
@@ -672,20 +676,28 @@ td {
 
 .session-grid,
 .session-responses-panel {
+  min-width: 0;
   margin-top: 22px;
 }
 
 .heatmap-card {
+  min-width: 0;
+  max-width: 100%;
   margin-top: 22px;
+  overflow: hidden;
 }
 
 .chart-grid {
+  min-width: 0;
+  max-width: 100%;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
   gap: 18px;
 }
 
 .question-chart-card {
+  min-width: 0;
+  max-width: 100%;
   padding: 22px;
   border-radius: var(--radius-lg);
 }
@@ -711,8 +723,9 @@ td {
 }
 
 .question-chart-layout {
+  min-width: 0;
   display: grid;
-  grid-template-columns: minmax(240px, 280px) 1fr;
+  grid-template-columns: minmax(0, 280px) minmax(0, 1fr);
   gap: 22px;
   align-items: center;
 }
@@ -892,11 +905,15 @@ td {
 }
 
 .chart-legend {
+  min-width: 0;
+  max-width: 100%;
   display: grid;
   gap: 12px;
 }
 
 .chart-legend-item {
+  min-width: 0;
+  max-width: 100%;
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 12px;
@@ -915,6 +932,8 @@ td {
 }
 
 .chart-legend-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-weight: 700;
   color: var(--text);
 }

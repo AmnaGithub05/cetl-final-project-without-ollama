@@ -9,8 +9,6 @@ import importlib
 from io import BytesIO
 from datetime import datetime, timezone
 from pathlib import Path
-import urllib.error
-import urllib.request
 
 from functools import wraps
 
@@ -23,13 +21,13 @@ app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
 app.secret_key = os.environ.get("MICROCHECK_SECRET_KEY", "dev-microcheck-secret-key")
 
-# Initialize the TinySLM for misconception detection
+# Initialize the private local Ollama model for AI features
 try:
-    from model_runner import TinySLMRunner
-    slm = TinySLMRunner("./slm_weights.pth", device='cpu')
-    print("✓ SLM initialized successfully")
+    from ollama_runner import OllamaRunner
+    slm = OllamaRunner()
+    print(f"✓ Private Ollama model initialized: {slm.model}")
 except Exception as e:
-    print(f"⚠ Warning: Could not initialize SLM: {e}")
+    print(f"⚠ Warning: Could not initialize private Ollama model: {e}")
     slm = None
 
 ADMIN_INSTRUCTOR_IDS = {"AMNA", "THANGAVAL", "HERMELA"}
@@ -411,109 +409,27 @@ def normalize_generated_questions(items, max_questions: int) -> list[dict]:
 
 
 def generate_questions_with_ai(text: str, max_questions: int = 10) -> list[dict] | tuple[None, str]:
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        return None, "OPENAI_API_KEY is not configured."
-
-    model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
     cleaned_text = normalize_uploaded_text(text) or re.sub(r'\s+', ' ', text).strip()
-    concept_request_body = {
-        "model": model,
-        "messages": [
-            {
-                "role": "system",
-                "content": "You extract concise concepts from lecture material. Return strict JSON only.",
-            },
-            {
-                "role": "user",
-                "content": (
-                    "Extract the core concepts, learning objectives, and important ideas from the lecture material. "
-                    "Do not copy long passages. Do not write questions yet. Return JSON with a 'concepts' array of short concept phrases.\n\n"
-                    f"Lecture material:\n{cleaned_text[:40000]}"
-                ),
-            },
-        ],
-        "temperature": 0.2,
-        "response_format": {"type": "json_object"},
-    }
+    if slm is None:
+        return None, "Private Ollama model is not configured or available."
 
-    def call_openai(request_body: dict):
-        request_data = json.dumps(request_body).encode("utf-8")
-        request_obj = urllib.request.Request(
-            "https://api.openai.com/v1/chat/completions",
-            data=request_data,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
+    try:
+        question_parsed = slm.generate_json(
+            f"""Generate exactly {max_questions} classroom questions from the lecture material below.
+Return ONLY valid JSON in this shape:
+{{"questions":[{{"question_type":"mcq","question_text":"...","options":["...","...","...","..."]}},{{"question_type":"open_ended","question_text":"...","options":[]}}]}}
+Use a mix of MCQ and open-ended questions. MCQs must have exactly four distinct options. Test understanding, application, comparison, and explanation. Do not copy long passages.
+
+LECTURE MATERIAL:
+{cleaned_text[:40000]}""",
+            temperature=0.3,
         )
-
-        with urllib.request.urlopen(request_obj, timeout=60) as response:
-            return json.loads(response.read().decode("utf-8"))
-
-    try:
-        concept_response_payload = call_openai(concept_request_body)
-    except urllib.error.HTTPError as error:
-        error_details = error.read().decode("utf-8", errors="ignore") if error.fp else str(error)
-        return None, f"OpenAI request failed: {error_details}"
-    except urllib.error.URLError as error:
-        return None, f"OpenAI request failed: {error.reason}"
-
-    try:
-        concept_content = concept_response_payload["choices"][0]["message"]["content"]
-        concept_parsed = json.loads(strip_code_fences(concept_content))
-    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
-        return None, f"Concept extraction could not be parsed: {error}"
-
-    concepts = [
-        str(concept).strip()
-        for concept in concept_parsed.get("concepts", [])
-        if str(concept).strip()
-    ]
-    if not concepts:
-        concepts = extract_concepts_from_text(text, max_concepts=12)
-
-    question_request_body = {
-        "model": model,
-        "messages": [
-            {
-                "role": "system",
-                "content": "You generate strict JSON only. No markdown, no code fences.",
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Create exactly {max_questions} questions that test understanding of the concepts below. "
-                    "Do not memorize the lecture wording. Focus on concept checks, application, comparison, and explanation. "
-                    "Return a mix of MCQ and open-ended questions. Aim for roughly half MCQ and half open-ended. "
-                    "MCQ questions must have exactly 4 distinct options, and the options should test the concept rather than copying the file. "
-                    "Return JSON with a 'questions' array in this shape: {\"questions\":[{\"question_type\":\"mcq\",\"question_text\":\"...\",\"options\":[\"...\",\"...\",\"...\",\"...\"]},{\"question_type\":\"open_ended\",\"question_text\":\"...\"}]}.\n\n"
-                    f"Concepts:\n- " + "\n- ".join(concepts)
-                ),
-            },
-        ],
-        "temperature": 0.3,
-        "response_format": {"type": "json_object"},
-    }
-
-    try:
-        question_response_payload = call_openai(question_request_body)
-    except urllib.error.HTTPError as error:
-        error_details = error.read().decode("utf-8", errors="ignore") if error.fp else str(error)
-        return None, f"OpenAI request failed: {error_details}"
-    except urllib.error.URLError as error:
-        return None, f"OpenAI request failed: {error.reason}"
-
-    try:
-        question_content = question_response_payload["choices"][0]["message"]["content"]
-        question_parsed = json.loads(strip_code_fences(question_content))
-    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
-        return None, f"Question generation could not be parsed: {error}"
+    except Exception as error:
+        return None, f"Private Ollama question generation failed: {error}"
 
     generated_questions = normalize_generated_questions(question_parsed.get("questions"), max_questions)
     if not generated_questions:
-        return None, "OpenAI did not return usable questions."
+        return None, "Private Ollama did not return usable questions."
 
     return generated_questions
 
