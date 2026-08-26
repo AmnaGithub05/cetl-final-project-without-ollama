@@ -154,6 +154,43 @@
   </article>
 </section>
 
+<!-- Misconception Analytics Dashboard -->
+<section class="card panel heatmap-card">
+  <div class="panel-head">
+    <div>
+      <p class="section-label">AI Misconception Detection</p>
+      <h3>Misconceptions detected by SLM</h3>
+    </div>
+  </div>
+
+  <div id="misconception-analytics" class="misconception-analytics">
+    <p class="status-text">Loading misconception data...</p>
+  </div>
+</section>
+
+<!-- Answer Key Modal -->
+<div id="answer-key-modal" class="answer-key-modal hidden" aria-hidden="true">
+  <div class="answer-key-modal-backdrop" data-answer-key-close></div>
+  <div class="answer-key-modal-panel" role="dialog" aria-modal="true" aria-labelledby="answer-key-modal-title">
+    <button class="answer-key-modal-close" type="button" aria-label="Close" data-answer-key-close>×</button>
+    <div class="answer-key-modal-head">
+      <h3 id="answer-key-modal-title">Upload Answer Key</h3>
+      <p class="answer-key-modal-question" id="answer-key-modal-question"></p>
+    </div>
+    <form id="answer-key-form" class="stack-form">
+      <label>
+        <span>Correct Answer</span>
+        <textarea id="answer-key-textarea" rows="5" placeholder="Enter the correct answer here..."></textarea>
+      </label>
+      <div class="modal-actions">
+        <button type="submit" class="btn btn-primary">Save Answer Key</button>
+        <button type="button" class="btn btn-ghost" data-answer-key-close>Cancel</button>
+      </div>
+    </form>
+    <p id="answer-key-message" class="status-text"></p>
+  </div>
+</div>
+
 <section class="card panel panel-table session-responses-panel">
   <div class="panel-head">
     <div>
@@ -171,12 +208,13 @@
           <th>Student ID</th>
           <th>Answer</th>
           <th>Justification</th>
+          <th>Misconception</th>
           <th>Time</th>
         </tr>
       </thead>
       <tbody id="responses-table-body">
         <tr>
-          <td colspan="5" class="empty-state">No responses yet. Share the session code with students.</td>
+          <td colspan="7" class="empty-state">No responses yet. Share the session code with students.</td>
         </tr>
       </tbody>
     </table>

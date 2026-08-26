@@ -23,6 +23,15 @@ app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
 app.secret_key = os.environ.get("MICROCHECK_SECRET_KEY", "dev-microcheck-secret-key")
 
+# Initialize the TinySLM for misconception detection
+try:
+    from model_runner import TinySLMRunner
+    slm = TinySLMRunner("./slm_weights.pth", device='cpu')
+    print("✓ SLM initialized successfully")
+except Exception as e:
+    print(f"⚠ Warning: Could not initialize SLM: {e}")
+    slm = None
+
 ADMIN_INSTRUCTOR_IDS = {"AMNA", "THANGAVAL", "HERMELA"}
 
 
@@ -112,6 +121,60 @@ def init_db() -> None:
             db.execute(
                 "ALTER TABLE session_questions ADD COLUMN question_type TEXT NOT NULL DEFAULT 'open_ended'"
             )
+
+        # Create table for misconception catalog
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS misconceptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                description TEXT,
+                severity TEXT DEFAULT 'MEDIUM',
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+
+        # Create table for professor resources associated with misconceptions
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS professor_resources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                misconception_id INTEGER NOT NULL,
+                resource_text TEXT,
+                resource_url TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (misconception_id) REFERENCES misconceptions(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        # Create table to track student misconceptions
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS student_misconceptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                response_id INTEGER NOT NULL,
+                student_id TEXT NOT NULL,
+                question_id INTEGER,
+                misconception_code TEXT,
+                confidence_score REAL,
+                severity TEXT,
+                feedback_text TEXT,
+                detected_at TEXT NOT NULL,
+                FOREIGN KEY (response_id) REFERENCES responses(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        # Add answer_key column to session_questions if it doesn't exist
+        question_columns = {
+            row[1]
+            for row in db.execute("PRAGMA table_info(session_questions)").fetchall()
+        }
+        if "answer_key" not in question_columns:
+            db.execute("ALTER TABLE session_questions ADD COLUMN answer_key TEXT")
 
 
 def parse_question_options(payload) -> list[str]:
@@ -941,8 +1004,66 @@ def submit_response():
             """,
             (session_code, question_id, student_id, answer, justification, submitted_at),
         )
+        db.commit()
 
-    return jsonify({"message": "Response submitted successfully.", "submitted_at": submitted_at}), 201
+        # Get the response ID, question text, and answer key for misconception detection
+        response_row = db.execute(
+            "SELECT id FROM responses WHERE question_id = ? AND student_id = ? ORDER BY id DESC LIMIT 1",
+            (question_id, student_id),
+        ).fetchone()
+        response_id = response_row["id"] if response_row else None
+
+        question_row = db.execute(
+            "SELECT question_text, answer_key FROM session_questions WHERE id = ?",
+            (question_id,),
+        ).fetchone()
+        question_text = question_row["question_text"] if question_row else ""
+        answer_key = question_row["answer_key"] if question_row else None
+
+        # Initialize misconception feedback
+        misconception_feedback = None
+        
+        # Run misconception detection if SLM is available
+        if slm is not None:
+            try:
+                # Pass answer key to SLM for better comparison
+                misconception_result = slm.predict_misconception(question_text, answer, answer_key=answer_key)
+                
+                # Store the misconception detection result in database
+                db.execute(
+                    """
+                    INSERT INTO student_misconceptions 
+                    (response_id, student_id, question_id, misconception_code, confidence_score, severity, feedback_text, detected_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        response_id,
+                        student_id,
+                        question_id,
+                        misconception_result.get("misconception_code"),
+                        misconception_result.get("confidence_score"),
+                        misconception_result.get("severity"),
+                        misconception_result.get("slm_feedback"),
+                        utc_now(),
+                    ),
+                )
+                db.commit()
+                misconception_feedback = misconception_result
+            except Exception as e:
+                print(f"Error during misconception detection: {e}")
+                # Continue without misconception feedback if SLM fails
+
+    response_data = {
+        "message": "Response submitted successfully.",
+        "submitted_at": submitted_at,
+        "response_id": response_id,
+    }
+    
+    # Include misconception feedback if available
+    if misconception_feedback:
+        response_data["misconception"] = misconception_feedback
+
+    return jsonify(response_data), 201
 
 
 @app.get("/api/sessions/<session_code>/responses")
@@ -959,15 +1080,20 @@ def get_session_responses(session_code: str):
         responses = db.execute(
             """
             SELECT
+                r.id,
                 r.student_id,
                 r.answer,
                 r.justification,
                 r.submitted_at,
                 r.question_id,
                 q.question_type,
-                q.question_text
+                q.question_text,
+                sm.misconception_code,
+                sm.severity as misconception_severity,
+                sm.feedback_text as misconception_feedback
             FROM responses AS r
             LEFT JOIN session_questions AS q ON q.id = r.question_id
+            LEFT JOIN student_misconceptions AS sm ON sm.response_id = r.id
             WHERE r.session_code = ?
             ORDER BY r.submitted_at DESC, r.id DESC
             """,
@@ -1014,6 +1140,9 @@ def get_session_responses(session_code: str):
                     "question_id": row["question_id"],
                     "question_type": row["question_type"],
                     "question_text": row["question_text"],
+                    "misconception_code": row["misconception_code"],
+                    "misconception_severity": row["misconception_severity"],
+                    "misconception_feedback": row["misconception_feedback"],
                 }
                 for row in responses
             ],
@@ -1190,6 +1319,84 @@ def import_questions_from_file(session_code: str):
             "generation_source": generation_source,
         }
     )
+
+
+@app.put("/api/instructor/questions/<int:question_id>/answer-key")
+@login_required
+def set_question_answer_key(question_id: int):
+    """Set the answer key for a question. Only the instructor who created the session can do this."""
+    payload = request.get_json(silent=True) or {}
+    answer_key = str(payload.get("answer_key", "")).strip()
+
+    if not answer_key:
+        return jsonify({"error": "Answer key is required."}), 400
+
+    with get_db() as db:
+        # Get the question and verify instructor access
+        question = db.execute(
+            """
+            SELECT q.id, q.session_code, s.creator_id
+            FROM session_questions AS q
+            JOIN sessions AS s ON s.session_code = q.session_code
+            WHERE q.id = ?
+            """,
+            (question_id,),
+        ).fetchone()
+
+        if question is None:
+            return jsonify({"error": "Question not found."}), 404
+
+        # Check if current user is the creator of the session
+        if question["creator_id"] != session.get("instructor_id"):
+            return jsonify({"error": "You do not have permission to modify this question."}), 403
+
+        # Update the answer key
+        db.execute(
+            "UPDATE session_questions SET answer_key = ? WHERE id = ?",
+            (answer_key, question_id),
+        )
+
+    return jsonify(
+        {
+            "message": "Answer key updated successfully.",
+            "question_id": question_id,
+            "answer_key": answer_key,
+        }
+    ), 200
+
+
+@app.get("/api/instructor/questions/<int:question_id>")
+@login_required
+def get_question_details(question_id: int):
+    """Get question details including answer key (for instructors only)."""
+    with get_db() as db:
+        question = db.execute(
+            """
+            SELECT q.*, s.creator_id
+            FROM session_questions AS q
+            JOIN sessions AS s ON s.session_code = q.session_code
+            WHERE q.id = ?
+            """,
+            (question_id,),
+        ).fetchone()
+
+        if question is None:
+            return jsonify({"error": "Question not found."}), 404
+
+        # Check if current user is the creator of the session
+        if question["creator_id"] != session.get("instructor_id"):
+            return jsonify({"error": "You do not have permission to view this question."}), 403
+
+        return jsonify(
+            {
+                "id": question["id"],
+                "session_code": question["session_code"],
+                "question_text": question["question_text"],
+                "question_type": question["question_type"],
+                "answer_key": question["answer_key"],
+                "created_at": question["created_at"],
+            }
+        ), 200
 
 
 @app.get("/api/instructor/sessions/<session_code>/responses")

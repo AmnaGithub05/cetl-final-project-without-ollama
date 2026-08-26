@@ -32,8 +32,18 @@ const sessionQuestionChartModalHover = document.getElementById('session-question
 const sessionQuestionChartModalLegend = document.getElementById('session-question-chart-modal-legend');
 const refreshBtn = document.getElementById('refresh-btn');
 
+// Answer Key Modal Elements
+const answerKeyModal = document.getElementById('answer-key-modal');
+const answerKeyForm = document.getElementById('answer-key-form');
+const answerKeyTextarea = document.getElementById('answer-key-textarea');
+const answerKeyModalTitle = document.getElementById('answer-key-modal-title');
+const answerKeyModalQuestion = document.getElementById('answer-key-modal-question');
+const answerKeyMessage = document.getElementById('answer-key-message');
+const misconceptionAnalytics = document.getElementById('misconception-analytics');
+
 let refreshTimer = null;
 let sessionQuestionChartGroups = [];
+let currentQuestionIdForAnswerKey = null;
 
 function setMessage(text, type = '') {
   dashboardMessage.textContent = text;
@@ -464,6 +474,136 @@ function renderQuestionOptions(questionType, options) {
   latestQuestionOptions.className = 'question-options-preview';
 }
 
+// Answer Key Functions
+function openAnswerKeyModal(questionId, questionText) {
+  currentQuestionIdForAnswerKey = questionId;
+  answerKeyModalQuestion.textContent = questionText;
+  answerKeyTextarea.value = '';
+  answerKeyMessage.textContent = '';
+  answerKeyMessage.className = 'status-text';
+  answerKeyModal.classList.remove('hidden');
+  answerKeyModal.setAttribute('aria-hidden', 'false');
+}
+
+function closeAnswerKeyModal() {
+  answerKeyModal.classList.add('hidden');
+  answerKeyModal.setAttribute('aria-hidden', 'true');
+  currentQuestionIdForAnswerKey = null;
+}
+
+async function saveAnswerKey(event) {
+  event.preventDefault();
+  
+  if (!currentQuestionIdForAnswerKey) {
+    answerKeyMessage.textContent = 'Error: No question selected.';
+    answerKeyMessage.className = 'status-text error';
+    return;
+  }
+  
+  const answerKey = answerKeyTextarea.value.trim();
+  if (!answerKey) {
+    answerKeyMessage.textContent = 'Please enter an answer key.';
+    answerKeyMessage.className = 'status-text error';
+    return;
+  }
+  
+  try {
+    const response = await fetch(`/api/instructor/questions/${currentQuestionIdForAnswerKey}/answer-key`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answer_key: answerKey }),
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to save answer key');
+    }
+    
+    answerKeyMessage.textContent = '✓ Answer key saved successfully!';
+    answerKeyMessage.className = 'status-text success';
+    setTimeout(closeAnswerKeyModal, 1500);
+  } catch (error) {
+    answerKeyMessage.textContent = `Error: ${error.message}`;
+    answerKeyMessage.className = 'status-text error';
+  }
+}
+
+// Misconception Analytics Functions
+async function loadMisconceptionAnalytics() {
+  try {
+    const responsesResponse = await fetch(`/api/instructor/sessions/${sessionCode}/responses`);
+    if (!responsesResponse.ok) throw new Error('Failed to load responses');
+    
+    const responsesData = await responsesResponse.json();
+    const responses = responsesData.responses || [];
+    
+    // Group misconceptions by type
+    const misconceptionsMap = new Map();
+    let totalDetected = 0;
+    
+    responses.forEach((response) => {
+      if (response.misconception_code) {
+        totalDetected++;
+        const key = response.misconception_code;
+        if (!misconceptionsMap.has(key)) {
+          misconceptionsMap.set(key, {
+            code: response.misconception_code,
+            severity: response.misconception_severity || 'UNKNOWN',
+            feedback: response.misconception_feedback || 'No feedback',
+            count: 0,
+            students: new Set(),
+          });
+        }
+        const item = misconceptionsMap.get(key);
+        item.count++;
+        item.students.add(response.student_id);
+      }
+    });
+    
+    // Render analytics
+    if (misconceptionsMap.size === 0) {
+      misconceptionAnalytics.innerHTML = '<p class="empty-state">No misconceptions detected yet.</p>';
+      return;
+    }
+    
+    const misconceptions = Array.from(misconceptionsMap.values())
+      .sort((a, b) => b.count - a.count);
+    
+    const html = `
+      <div class="misconception-summary">
+        <div class="summary-stat">
+          <span class="stat-label">Total Misconceptions Detected</span>
+          <span class="stat-value">${totalDetected}</span>
+        </div>
+        <div class="summary-stat">
+          <span class="stat-label">Unique Types</span>
+          <span class="stat-value">${misconceptions.length}</span>
+        </div>
+      </div>
+      <div class="misconception-list">
+        ${misconceptions
+          .map(
+            (m) => `
+          <div class="misconception-item severity-${m.severity.toLowerCase()}">
+            <div class="misconception-header">
+              <strong>${m.code}</strong>
+              <span class="severity-badge">${m.severity}</span>
+            </div>
+            <p class="misconception-stats">${m.count} detection${m.count !== 1 ? 's' : ''} • ${m.students.size} student${m.students.size !== 1 ? 's' : ''}</p>
+            <p class="misconception-feedback">${escapeHtml(m.feedback.substring(0, 150))}${m.feedback.length > 150 ? '...' : ''}</p>
+          </div>
+        `,
+          )
+          .join('')}
+      </div>
+    `;
+    
+    misconceptionAnalytics.innerHTML = html;
+  } catch (error) {
+    misconceptionAnalytics.innerHTML = `<p class="status-text error">Error loading misconceptions: ${error.message}</p>`;
+  }
+}
+
 function renderQuestions(questions) {
   if (!questions.length) {
     latestQuestionDisplay.textContent = 'No questions have been added yet.';
@@ -486,25 +626,40 @@ function renderQuestions(questions) {
             <p class="question-list-text">${question.question_text}</p>
             <p class="question-list-meta">Added ${formatTime(question.created_at)}</p>
             <p class="question-list-meta">Type: ${formatQuestionType(question.question_type)}</p>
+            ${question.answer_key ? `<p class="question-list-meta answer-key-badge">✓ Answer key set</p>` : ''}
             ${question.question_type === 'mcq' && normalizeOptions(question.options).length ? `
               <ul class="mcq-option-list question-list-options">
                 ${normalizeOptions(question.options).map((option) => `<li>${option}</li>`).join('')}
               </ul>
             ` : ''}
           </div>
-          <div class="question-list-count">
-            <strong>${question.response_count}</strong>
-            <span>responses</span>
+          <div class="question-list-actions">
+            <button class="btn btn-sm btn-ghost answer-key-btn" data-question-id="${question.id}" data-question-text="${escapeHtml(question.question_text)}">
+              ${question.answer_key ? '✎ Edit' : '+ Add'} Answer Key
+            </button>
+            <div class="question-list-count">
+              <strong>${question.response_count}</strong>
+              <span>responses</span>
+            </div>
           </div>
         </article>
       `,
     )
     .join('');
+    
+  // Add event listeners to answer key buttons
+  document.querySelectorAll('.answer-key-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const qId = btn.dataset.questionId;
+      const qText = btn.dataset.questionText;
+      openAnswerKeyModal(qId, qText);
+    });
+  });
 }
 
 function renderResponses(responses) {
   if (!responses.length) {
-    responsesTableBody.innerHTML = '<tr><td colspan="6" class="empty-state">No responses yet. Share the session code with students.</td></tr>';
+    responsesTableBody.innerHTML = '<tr><td colspan="7" class="empty-state">No responses yet. Share the session code with students.</td></tr>';
     return;
   }
 
@@ -517,6 +672,7 @@ function renderResponses(responses) {
           <td><strong>${response.student_id}</strong></td>
           <td>${response.answer}</td>
           <td>${response.justification}</td>
+          <td>${response.misconception_code ? `<span class="misconception-tag">${response.misconception_code}</span>` : '-'}</td>
           <td>${formatTime(response.submitted_at)}</td>
         </tr>
       `,
@@ -553,6 +709,7 @@ async function loadSessionData() {
     renderQuestions(questionsData.questions);
     renderResponses(responsesData.responses);
     renderSessionQuestionCharts(questionsData.questions, responsesData.responses);
+    loadMisconceptionAnalytics();
   } catch (error) {
     setMessage(error.message, 'error');
   }
@@ -656,6 +813,14 @@ questionTypeInput.addEventListener('change', () => {
 });
 
 refreshBtn.addEventListener('click', loadSessionData);
+
+// Answer Key Modal Event Listeners
+answerKeyForm.addEventListener('submit', saveAnswerKey);
+
+// Close answer key modal on backdrop click
+document.querySelectorAll('[data-answer-key-close]').forEach((element) => {
+  element.addEventListener('click', closeAnswerKeyModal);
+});
 
 setQuestionTypeUi(questionTypeInput.value);
 loadSessionData();
