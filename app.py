@@ -254,10 +254,11 @@ def extract_text_from_upload(uploaded_file) -> str:
 
 
 def normalize_uploaded_text(text: str) -> str:
+    """Minimal normalization - let ChatGPT handle content filtering."""
     lines = [re.sub(r'\s+', ' ', line).strip() for line in text.splitlines()]
     cleaned_lines = []
 
-    # Pattern to match actual junk (PDF metadata, corrupted text, etc.)
+    # Only filter out obvious PDF/binary junk that breaks JSON parsing
     junk_patterns = [
         r'^%pdf',
         r'^% reportlab',
@@ -276,29 +277,12 @@ def normalize_uploaded_text(text: str) -> str:
             continue
 
         lowered = line.lower()
-        # Filter out PDF/binary junk
+        # Only filter PDF metadata/binary junk
         if any(re.match(pattern, lowered) for pattern in junk_patterns):
             continue
 
-        # Skip lines that are ONLY numbers, special characters, or single characters
-        if len(line) < 2:
-            continue
-        
-        # Skip lines that are only numbers/symbols with no letters
-        if not re.search(r'[A-Za-z]', line):
-            continue
-
-        # Count meaningful words (any sequence of 2+ characters that aren't pure numbers)
-        words = re.findall(r'\b[A-Za-z]{1,}[\w]*\b', line)
-        
-        # Keep line if:
-        # - Has 2+ words (universal threshold for any language/topic), OR
-        # - Is 20+ characters (likely meaningful content), OR
-        # - Contains question marks or colons (likely headers/prompts)
-        has_question = '?' in line or ':' in line
-        
-        if len(words) >= 2 or len(line) >= 20 or has_question:
-            cleaned_lines.append(line)
+        # Keep everything else - let ChatGPT decide what's relevant
+        cleaned_lines.append(line)
 
     if not cleaned_lines:
         return ""
@@ -453,72 +437,47 @@ def generate_questions_with_ai(text: str, max_questions: int = 10) -> list[dict]
             messages=[
                 {
                     "role": "system",
-                    "content": """You are an expert teacher creating classroom questions from presentation slides.
-Generate exactly the requested number of natural, useful questions that test understanding of lecture material.
-Return ONLY valid JSON in this shape:
+                    "content": """You are an expert educator creating natural, thoughtful questions from lecture material.
+
+Generate exactly the requested number of questions that test genuine understanding.
+Return ONLY valid JSON in this exact format:
 {"questions":[{"question_type":"mcq","question_text":"...","options":["...","...","...","..."]},{"question_type":"open_ended","question_text":"...","options":[]}]}
 
-CRITICAL REQUIREMENT - QUESTION STEM DIVERSITY:
-- NEVER use the same question stem/template more than once
-- Each question MUST start differently
-- Do NOT use repetitive patterns like "If the situation described here changed..."
-- Vary the question structure across ALL questions
+Create a mix of MCQ (multiple choice) and open-ended questions - roughly half of each.
 
-REQUIREMENTS FOR ALL QUESTIONS:
-- Use ONLY information found in the lecture material
-- Focus on important concepts, explanations, relationships, examples, processes, and conclusions
-- Write clear, conversational, grammatically correct questions the way a real teacher would ask them
-- Each question must be understandable on its own
-- Do NOT ask about slide numbers, headings, or presentation structure
-- Do NOT invent facts or require outside knowledge
-- Do NOT create duplicate or nearly identical questions
-- Make each question linguistically and structurally unique
+CORE PRINCIPLES:
+- Use ONLY information from the lecture material provided
+- Make each question unique and distinct from others
+- Write questions that a real teacher would ask in class
+- Focus on understanding, not trivia or memorization
+- Ensure each question has one clear correct answer (MCQ) or a solid answer path (open-ended)
 
-QUESTION STEMS TO USE (one per question, never repeat):
-- "What is the main purpose of ...?"
-- "How does ... work?"
-- "Why is ... important?"
-- "What is the difference between ... and ...?"
-- "What happens when ...?"
-- "How are ... and ... related?"
-- "Can you explain ... in your own words?"
-- "Which of these best describes ...?"
-- "What would happen if ...?"
-- "How would you apply ... to ...?"
-
-QUESTION STEMS TO NEVER USE:
-- "If the situation described here changed..." (avoid this completely)
-- "What is..." (use sparingly, only once if at all)
-- "Explain..." (use active voice instead)
-- "Define..." (focus on understanding, not memorization)
-
-FOR MCQ QUESTIONS (exactly 4 options each):
-- Make distractors plausible but clearly wrong based on the material
-- Ensure exactly one defensibly correct answer from the material
-- Do not make questions so easy the answer is obvious
+FOR MCQ QUESTIONS:
+- Exactly 4 options per question
+- One clearly correct answer
+- Distractors should be plausible but wrong
+- Don't make questions where the answer is obvious
 
 FOR OPEN-ENDED QUESTIONS:
-- Ask for explanation, reasoning, comparison, or application
-- Expect a thoughtful answer, not just a fact or one word
-- Ensure the answer can be supported by the lecture material
+- Ask for explanation, reasoning, or application
+- Expect a thoughtful written response
+- Answers should be supported by the lecture material
 
-BEFORE RETURNING:
-- Check that NO two questions start the same way
-- Check that question stems are diverse in structure
-- Check that each question is unique and clear"""
+QUALITY CHECK BEFORE RESPONDING:
+- No two questions should sound similar
+- Each question addresses different concepts/ideas
+- Questions vary in structure and phrasing"""
                 },
                 {
                     "role": "user",
-                    "content": f"Generate exactly {max_questions} questions from this lecture material:\n\n{cleaned_text[:40000]}"
+                    "content": f"From this lecture material, generate exactly {max_questions} questions:\n\n{cleaned_text[:40000]}"
                 }
             ],
             temperature=0.7,
         )
         question_text = response.choices[0].message.content
-        # Extract JSON from response
         question_parsed = json.loads(question_text)
     except json.JSONDecodeError:
-        # Try to extract JSON from the response if it's wrapped in text
         try:
             import re as re_module
             json_match = re_module.search(r'\{.*\}', question_text, re_module.DOTALL)
