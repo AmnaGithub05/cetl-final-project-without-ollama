@@ -257,6 +257,7 @@ def normalize_uploaded_text(text: str) -> str:
     lines = [re.sub(r'\s+', ' ', line).strip() for line in text.splitlines()]
     cleaned_lines = []
 
+    # Pattern to match actual junk (PDF metadata, corrupted text, etc.)
     junk_patterns = [
         r'^%pdf',
         r'^% reportlab',
@@ -275,21 +276,28 @@ def normalize_uploaded_text(text: str) -> str:
             continue
 
         lowered = line.lower()
-        # Check if line matches junk patterns
+        # Filter out PDF/binary junk
         if any(re.match(pattern, lowered) for pattern in junk_patterns):
             continue
 
-        # Filter out very short lines (less than 2 characters)
+        # Skip lines that are ONLY numbers, special characters, or single characters
         if len(line) < 2:
             continue
-
-        # Keep lines with meaningful content: at least 2 words with 2+ letters each,
-        # or lines with uppercase acronyms (like HTTP, DNS, SMTP, FTP, TCP/IP, etc.)
-        words = re.findall(r'[A-Za-z]{2,}', line)
-        has_acronym = bool(re.search(r'\b[A-Z]{2,}\b', line))  # Match uppercase acronyms
         
-        # Keep if: has enough words OR has acronyms OR is longer than 15 characters (likely meaningful)
-        if len(words) >= 2 or has_acronym or len(line) >= 15:
+        # Skip lines that are only numbers/symbols with no letters
+        if not re.search(r'[A-Za-z]', line):
+            continue
+
+        # Count meaningful words (any sequence of 2+ characters that aren't pure numbers)
+        words = re.findall(r'\b[A-Za-z]{1,}[\w]*\b', line)
+        
+        # Keep line if:
+        # - Has 2+ words (universal threshold for any language/topic), OR
+        # - Is 20+ characters (likely meaningful content), OR
+        # - Contains question marks or colons (likely headers/prompts)
+        has_question = '?' in line or ':' in line
+        
+        if len(words) >= 2 or len(line) >= 20 or has_question:
             cleaned_lines.append(line)
 
     if not cleaned_lines:
