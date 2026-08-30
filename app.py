@@ -254,40 +254,9 @@ def extract_text_from_upload(uploaded_file) -> str:
 
 
 def normalize_uploaded_text(text: str) -> str:
-    """Minimal normalization - let ChatGPT handle content filtering."""
-    lines = [re.sub(r'\s+', ' ', line).strip() for line in text.splitlines()]
-    cleaned_lines = []
-
-    # Only filter out obvious PDF/binary junk that breaks JSON parsing
-    junk_patterns = [
-        r'^%pdf',
-        r'^% reportlab',
-        r'^\d+\s+\d+\s+obj$',
-        r'^endobj$',
-        r'^xref$',
-        r'^trailer$',
-        r'^startxref$',
-        r'^%%eof$',
-        r'^<<.*>>$',
-        r'^/[^\s]+\s+.*$',
-    ]
-
-    for line in lines:
-        if not line:
-            continue
-
-        lowered = line.lower()
-        # Only filter PDF metadata/binary junk
-        if any(re.match(pattern, lowered) for pattern in junk_patterns):
-            continue
-
-        # Keep everything else - let ChatGPT decide what's relevant
-        cleaned_lines.append(line)
-
-    if not cleaned_lines:
-        return ""
-
-    return "\n".join(cleaned_lines)
+    """Pass through text with minimal processing."""
+    lines = [re.sub(r'\s+', ' ', line).strip() for line in text.splitlines() if line.strip()]
+    return "\n".join(lines)
 
 
 def summarize_snippet(text: str, limit: int = 90) -> str:
@@ -427,7 +396,7 @@ def normalize_generated_questions(items, max_questions: int) -> list[dict]:
 
 
 def generate_questions_with_ai(text: str, max_questions: int = 10) -> list[dict] | tuple[None, str]:
-    cleaned_text = normalize_uploaded_text(text) or re.sub(r'\s+', ' ', text).strip()
+    """Simple OpenAI question generation - MCQs and open-ended."""
     if chatgpt_client is None:
         return None, "ChatGPT (OpenAI API) is not configured or available. Please set OPENAI_API_KEY."
 
@@ -437,58 +406,43 @@ def generate_questions_with_ai(text: str, max_questions: int = 10) -> list[dict]
             messages=[
                 {
                     "role": "system",
-                    "content": """You are an expert educator creating natural, thoughtful questions from lecture material.
+                    "content": """Generate test questions from the provided lecture material.
+Return ONLY valid JSON - nothing else.
+Format: {"questions":[{"question_type":"mcq","question_text":"...","options":["A","B","C","D"]},{"question_type":"open_ended","question_text":"...","options":[]}]}
 
-Generate exactly the requested number of questions that test genuine understanding.
-Return ONLY valid JSON in this exact format:
-{"questions":[{"question_type":"mcq","question_text":"...","options":["...","...","...","..."]},{"question_type":"open_ended","question_text":"...","options":[]}]}
-
-Create a mix of MCQ (multiple choice) and open-ended questions - roughly half of each.
-
-CORE PRINCIPLES:
-- Use ONLY information from the lecture material provided
-- Make each question unique and distinct from others
-- Write questions that a real teacher would ask in class
-- Focus on understanding, not trivia or memorization
-- Ensure each question has one clear correct answer (MCQ) or a solid answer path (open-ended)
-
-FOR MCQ QUESTIONS:
-- Exactly 4 options per question
-- One clearly correct answer
-- Distractors should be plausible but wrong
-- Don't make questions where the answer is obvious
-
-FOR OPEN-ENDED QUESTIONS:
-- Ask for explanation, reasoning, or application
-- Expect a thoughtful written response
-- Answers should be supported by the lecture material
-
-QUALITY CHECK BEFORE RESPONDING:
-- No two questions should sound similar
-- Each question addresses different concepts/ideas
-- Questions vary in structure and phrasing"""
+Requirements:
+- Mix MCQ and open-ended questions (roughly half each)
+- Use ONLY information from the lecture material
+- MCQ: 4 options, 1 clearly correct answer, 3 plausible distractors
+- Open-ended: Ask for explanation or reasoning
+- Keep questions concise and clear
+- Make each question different
+- No trick questions, no ambiguous answers"""
                 },
                 {
                     "role": "user",
-                    "content": f"From this lecture material, generate exactly {max_questions} questions:\n\n{cleaned_text[:40000]}"
+                    "content": f"Generate exactly {max_questions} questions from this material:\n\n{text[:40000]}"
                 }
             ],
             temperature=0.7,
         )
-        question_text = response.choices[0].message.content
-        question_parsed = json.loads(question_text)
-    except json.JSONDecodeError:
+        
+        response_text = response.choices[0].message.content.strip()
+        question_parsed = json.loads(response_text)
+        
+    except json.JSONDecodeError as e:
+        # Try to extract JSON if wrapped in text
         try:
             import re as re_module
-            json_match = re_module.search(r'\{.*\}', question_text, re_module.DOTALL)
+            json_match = re_module.search(r'\{.*\}', response_text, re_module.DOTALL)
             if json_match:
                 question_parsed = json.loads(json_match.group(0))
             else:
-                return None, "ChatGPT returned invalid JSON that could not be parsed."
+                return None, f"ChatGPT returned invalid JSON: {str(e)}"
         except Exception as parse_error:
             return None, f"Failed to parse ChatGPT response: {parse_error}"
     except Exception as error:
-        return None, f"ChatGPT question generation failed: {error}"
+        return None, f"ChatGPT API error: {error}"
 
     generated_questions = normalize_generated_questions(question_parsed.get("questions"), max_questions)
     if not generated_questions:
@@ -1226,24 +1180,15 @@ def import_questions_from_file(session_code: str):
         return jsonify({"error": "The uploaded file could not be read as text."}), 400
 
     generated_questions = generate_questions_with_ai(file_text, requested_count)
-    generation_source = "ai"
+    generation_source = "ChatGPT"
 
     if isinstance(generated_questions, tuple):
         generated_questions, error_message = generated_questions
         if generated_questions is None:
-            generated_questions = []
-            generation_source = "heuristic"
+            return jsonify({"error": error_message or "ChatGPT question generation failed."}), 400
 
     if not generated_questions:
-        fallback_questions = generate_questions_from_text(file_text, requested_count)
-        generated_questions = [
-            {
-                "question_text": question_text,
-                "question_type": "open_ended",
-                "options": [],
-            }
-            for question_text in fallback_questions
-        ]
+        return jsonify({"error": "ChatGPT did not generate usable questions. Try uploading different content."}), 400
         generation_source = "heuristic"
 
     if not generated_questions:
