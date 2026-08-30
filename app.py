@@ -14,6 +14,11 @@ from functools import wraps
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("MICROCHECK_DB_PATH", str(BASE_DIR / "microcheck.db")))
 
@@ -21,7 +26,7 @@ app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
 app.secret_key = os.environ.get("MICROCHECK_SECRET_KEY", "dev-microcheck-secret-key")
 
-# Initialize the private local Ollama model for AI features
+# Initialize the private local Ollama model for misconception detection
 try:
     from ollama_runner import OllamaRunner
     slm = OllamaRunner()
@@ -29,6 +34,19 @@ try:
 except Exception as e:
     print(f"⚠ Warning: Could not initialize private Ollama model: {e}")
     slm = None
+
+# Initialize ChatGPT for question generation
+if OpenAI is not None:
+    openai_api_key = os.environ.get("OPENAI_API_KEY")
+    if openai_api_key:
+        chatgpt_client = OpenAI(api_key=openai_api_key)
+        print("✓ ChatGPT (OpenAI) initialized for question generation")
+    else:
+        chatgpt_client = None
+        print("⚠ Warning: OPENAI_API_KEY not set")
+else:
+    chatgpt_client = None
+    print("⚠ Warning: OpenAI library not installed. Install with: pip install openai")
 
 ADMIN_INSTRUCTOR_IDS = {"AMNA", "THANGAVAL", "HERMELA"}
 
@@ -410,19 +428,22 @@ def normalize_generated_questions(items, max_questions: int) -> list[dict]:
 
 def generate_questions_with_ai(text: str, max_questions: int = 10) -> list[dict] | tuple[None, str]:
     cleaned_text = normalize_uploaded_text(text) or re.sub(r'\s+', ' ', text).strip()
-    if slm is None:
-        return None, "Private Ollama model is not configured or available."
+    if chatgpt_client is None:
+        return None, "ChatGPT (OpenAI API) is not configured or available. Please set OPENAI_API_KEY."
 
     try:
-        question_parsed = slm.generate_json(
-            f"""You are an expert teacher creating classroom questions from presentation slides.
-
-Generate exactly {max_questions} natural, useful questions that test understanding of the lecture material.
+        response = chatgpt_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": """You are an expert teacher creating classroom questions from presentation slides.
+Generate exactly the requested number of natural, useful questions that test understanding of lecture material.
 Return ONLY valid JSON in this shape:
-{{"questions":[{{"question_type":"mcq","question_text":"...","options":["...","...","...","..."]}},{{"question_type":"open_ended","question_text":"...","options":[]}}]}}
+{"questions":[{"question_type":"mcq","question_text":"...","options":["...","...","...","..."]},{"question_type":"open_ended","question_text":"...","options":[]}]}
 
 REQUIREMENTS FOR ALL QUESTIONS:
-- Use ONLY information found in the lecture material below
+- Use ONLY information found in the lecture material
 - Focus on important concepts, explanations, relationships, examples, processes, and conclusions
 - Write clear, conversational, grammatically correct questions the way a real teacher would ask them
 - Each question must be understandable on its own
@@ -456,18 +477,35 @@ FOR MCQ QUESTIONS (exactly 4 options each):
 FOR OPEN-ENDED QUESTIONS:
 - Ask for explanation, reasoning, comparison, or application
 - Expect a thoughtful answer, not just a fact or one word
-- Ensure the answer can be supported by the lecture material
-
-LECTURE MATERIAL:
-{cleaned_text[:40000]}""",
+- Ensure the answer can be supported by the lecture material"""
+                },
+                {
+                    "role": "user",
+                    "content": f"Generate exactly {max_questions} questions from this lecture material:\n\n{cleaned_text[:40000]}"
+                }
+            ],
             temperature=0.3,
         )
+        question_text = response.choices[0].message.content
+        # Extract JSON from response
+        question_parsed = json.loads(question_text)
+    except json.JSONDecodeError:
+        # Try to extract JSON from the response if it's wrapped in text
+        try:
+            import re as re_module
+            json_match = re_module.search(r'\{.*\}', question_text, re_module.DOTALL)
+            if json_match:
+                question_parsed = json.loads(json_match.group(0))
+            else:
+                return None, "ChatGPT returned invalid JSON that could not be parsed."
+        except Exception as parse_error:
+            return None, f"Failed to parse ChatGPT response: {parse_error}"
     except Exception as error:
-        return None, f"Private Ollama question generation failed: {error}"
+        return None, f"ChatGPT question generation failed: {error}"
 
     generated_questions = normalize_generated_questions(question_parsed.get("questions"), max_questions)
     if not generated_questions:
-        return None, "Private Ollama did not return usable questions."
+        return None, "ChatGPT did not return usable questions."
 
     return generated_questions
 
