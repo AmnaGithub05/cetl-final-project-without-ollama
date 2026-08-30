@@ -14,12 +14,19 @@ from functools import wraps
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 
+BASE_DIR = Path(__file__).resolve().parent
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv(BASE_DIR / ".env")
+except ImportError:
+    pass
+
 try:
     from openai import OpenAI
 except ImportError:
     OpenAI = None
-
-BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("MICROCHECK_DB_PATH", str(BASE_DIR / "microcheck.db")))
 
 app = Flask(__name__)
