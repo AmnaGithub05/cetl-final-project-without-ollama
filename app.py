@@ -458,6 +458,12 @@ Generate exactly the requested number of natural, useful questions that test und
 Return ONLY valid JSON in this shape:
 {"questions":[{"question_type":"mcq","question_text":"...","options":["...","...","...","..."]},{"question_type":"open_ended","question_text":"...","options":[]}]}
 
+CRITICAL REQUIREMENT - QUESTION STEM DIVERSITY:
+- NEVER use the same question stem/template more than once
+- Each question MUST start differently
+- Do NOT use repetitive patterns like "If the situation described here changed..."
+- Vary the question structure across ALL questions
+
 REQUIREMENTS FOR ALL QUESTIONS:
 - Use ONLY information found in the lecture material
 - Focus on important concepts, explanations, relationships, examples, processes, and conclusions
@@ -466,9 +472,9 @@ REQUIREMENTS FOR ALL QUESTIONS:
 - Do NOT ask about slide numbers, headings, or presentation structure
 - Do NOT invent facts or require outside knowledge
 - Do NOT create duplicate or nearly identical questions
-- Vary sentence structure naturally—do not repeatedly use the same question template
+- Make each question linguistically and structurally unique
 
-PREFERRED QUESTION TYPES (mix about half MCQ and half open-ended):
+QUESTION STEMS TO USE (one per question, never repeat):
 - "What is the main purpose of ...?"
 - "How does ... work?"
 - "Why is ... important?"
@@ -476,14 +482,15 @@ PREFERRED QUESTION TYPES (mix about half MCQ and half open-ended):
 - "What happens when ...?"
 - "How are ... and ... related?"
 - "Can you explain ... in your own words?"
+- "Which of these best describes ...?"
+- "What would happen if ...?"
+- "How would you apply ... to ...?"
 
-WHAT TO AVOID:
-- Robotic or unnatural-sounding questions
-- Vague questions like "What does this mean?" or "Explain the following"
-- Merely adding "What is" before copied slide text
-- Questions where the answer is obvious from how you phrased it
-- One-word or trivial answers
-- Testing only vocabulary or surface-level recall
+QUESTION STEMS TO NEVER USE:
+- "If the situation described here changed..." (avoid this completely)
+- "What is..." (use sparingly, only once if at all)
+- "Explain..." (use active voice instead)
+- "Define..." (focus on understanding, not memorization)
 
 FOR MCQ QUESTIONS (exactly 4 options each):
 - Make distractors plausible but clearly wrong based on the material
@@ -493,14 +500,19 @@ FOR MCQ QUESTIONS (exactly 4 options each):
 FOR OPEN-ENDED QUESTIONS:
 - Ask for explanation, reasoning, comparison, or application
 - Expect a thoughtful answer, not just a fact or one word
-- Ensure the answer can be supported by the lecture material"""
+- Ensure the answer can be supported by the lecture material
+
+BEFORE RETURNING:
+- Check that NO two questions start the same way
+- Check that question stems are diverse in structure
+- Check that each question is unique and clear"""
                 },
                 {
                     "role": "user",
                     "content": f"Generate exactly {max_questions} questions from this lecture material:\n\n{cleaned_text[:40000]}"
                 }
             ],
-            temperature=0.3,
+            temperature=0.7,
         )
         question_text = response.choices[0].message.content
         # Extract JSON from response
