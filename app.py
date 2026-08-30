@@ -275,14 +275,22 @@ def normalize_uploaded_text(text: str) -> str:
             continue
 
         lowered = line.lower()
+        # Check if line matches junk patterns
         if any(re.match(pattern, lowered) for pattern in junk_patterns):
             continue
 
-        alpha_words = re.findall(r'[A-Za-z]{3,}', line)
-        if len(alpha_words) < 4:
+        # Filter out very short lines (less than 2 characters)
+        if len(line) < 2:
             continue
 
-        cleaned_lines.append(line)
+        # Keep lines with meaningful content: at least 2 words with 2+ letters each,
+        # or lines with uppercase acronyms (like HTTP, DNS, SMTP, FTP, TCP/IP, etc.)
+        words = re.findall(r'[A-Za-z]{2,}', line)
+        has_acronym = bool(re.search(r'\b[A-Z]{2,}\b', line))  # Match uppercase acronyms
+        
+        # Keep if: has enough words OR has acronyms OR is longer than 15 characters (likely meaningful)
+        if len(words) >= 2 or has_acronym or len(line) >= 15:
+            cleaned_lines.append(line)
 
     if not cleaned_lines:
         return ""
