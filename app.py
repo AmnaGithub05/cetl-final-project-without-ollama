@@ -415,14 +415,48 @@ def generate_questions_with_ai(text: str, max_questions: int = 10) -> list[dict]
 
     try:
         question_parsed = slm.generate_json(
-            f"""Generate exactly {max_questions} rigorous classroom questions from the lecture material below.
+            f"""You are an expert teacher creating classroom questions from presentation slides.
+
+Generate exactly {max_questions} natural, useful questions that test understanding of the lecture material.
 Return ONLY valid JSON in this shape:
 {{"questions":[{{"question_type":"mcq","question_text":"...","options":["...","...","...","..."]}},{{"question_type":"open_ended","question_text":"...","options":[]}}]}}
-Use a mix of MCQ and open-ended questions, with roughly half of each. These must be logical reasoning questions, not vocabulary or surface-level recall.
-Every question must require the student to connect at least two ideas, infer a consequence, apply a principle to a new situation, compare alternatives, evaluate evidence, identify an assumption, diagnose an error, or predict an outcome.
-Prefer question stems such as: "What would most likely happen if... and why?", "Which conclusion is best supported by...", "How would changing X affect Y?", "Which explanation accounts for both...", or "What assumption is necessary for...?"
-For MCQs, make the distractors plausible reasoning errors, use exactly four distinct options, and make only one option defensibly correct from the material. Do not ask "What is...", "Define...", or "What is the main idea..." unless the question also requires reasoning. Do not copy long passages.
-Open-ended questions must ask for a chain of reasoning or evidence, not a one-word answer.
+
+REQUIREMENTS FOR ALL QUESTIONS:
+- Use ONLY information found in the lecture material below
+- Focus on important concepts, explanations, relationships, examples, processes, and conclusions
+- Write clear, conversational, grammatically correct questions the way a real teacher would ask them
+- Each question must be understandable on its own
+- Do NOT ask about slide numbers, headings, or presentation structure
+- Do NOT invent facts or require outside knowledge
+- Do NOT create duplicate or nearly identical questions
+- Vary sentence structure naturally—do not repeatedly use the same question template
+
+PREFERRED QUESTION TYPES (mix about half MCQ and half open-ended):
+- "What is the main purpose of ...?"
+- "How does ... work?"
+- "Why is ... important?"
+- "What is the difference between ... and ...?"
+- "What happens when ...?"
+- "How are ... and ... related?"
+- "Can you explain ... in your own words?"
+
+WHAT TO AVOID:
+- Robotic or unnatural-sounding questions
+- Vague questions like "What does this mean?" or "Explain the following"
+- Merely adding "What is" before copied slide text
+- Questions where the answer is obvious from how you phrased it
+- One-word or trivial answers
+- Testing only vocabulary or surface-level recall
+
+FOR MCQ QUESTIONS (exactly 4 options each):
+- Make distractors plausible but clearly wrong based on the material
+- Ensure exactly one defensibly correct answer from the material
+- Do not make questions so easy the answer is obvious
+
+FOR OPEN-ENDED QUESTIONS:
+- Ask for explanation, reasoning, comparison, or application
+- Expect a thoughtful answer, not just a fact or one word
+- Ensure the answer can be supported by the lecture material
 
 LECTURE MATERIAL:
 {cleaned_text[:40000]}""",
