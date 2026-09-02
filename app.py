@@ -537,6 +537,8 @@ def login_required(view):
     @wraps(view)
     def wrapped_view(*args, **kwargs):
         if not current_instructor_id():
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Instructor login required."}), 401
             return redirect(url_for("instructor_access_page"))
         return view(*args, **kwargs)
 
@@ -548,6 +550,8 @@ def instructor_session_access_required(view):
     def wrapped_view(session_code: str, *args, **kwargs):
         instructor_id = current_instructor_id()
         if not instructor_id:
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Instructor login required."}), 401
             return redirect(url_for("instructor_access_page"))
 
         with get_db() as db:
