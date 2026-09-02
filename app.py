@@ -434,14 +434,31 @@ Generate exactly {max_questions} questions from this material:
                 "responseMimeType": "application/json",
             },
         }).encode("utf-8")
-        request = urllib.request.Request(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=90) as response:
-            result = json.loads(response.read().decode("utf-8"))
+        models_to_try = list(dict.fromkeys([
+            gemini_model,
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+        ]))
+        result = None
+        last_not_found = None
+        for model_name in models_to_try:
+            request = urllib.request.Request(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={gemini_api_key}",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=90) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                break
+            except urllib.error.HTTPError as error:
+                if error.code != 404:
+                    raise
+                last_not_found = error
+
+        if result is None:
+            raise RuntimeError(f"No configured Gemini model was found: {last_not_found}")
 
         response_text = result["candidates"][0]["content"]["parts"][0]["text"].strip()
         question_parsed = json.loads(response_text)
