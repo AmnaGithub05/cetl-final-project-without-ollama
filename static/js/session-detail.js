@@ -536,11 +536,11 @@ async function loadMisconceptionAnalytics() {
     
     const responsesData = await responsesResponse.json();
     const responses = responsesData.responses || [];
-    
-    // Group misconceptions by type
+    const questions = responsesData.questions || [];
     const misconceptionsMap = new Map();
+    const matrix = new Map();
     let totalDetected = 0;
-    
+
     responses.forEach((response) => {
       if (response.misconception_code) {
         totalDetected++;
@@ -549,26 +549,32 @@ async function loadMisconceptionAnalytics() {
           misconceptionsMap.set(key, {
             code: response.misconception_code,
             severity: response.misconception_severity || 'UNKNOWN',
-            feedback: response.misconception_feedback || 'No feedback',
             count: 0,
-            students: new Set(),
           });
         }
         const item = misconceptionsMap.get(key);
         item.count++;
-        item.students.add(response.student_id);
+
+        if (!matrix.has(response.question_id)) {
+          matrix.set(response.question_id, new Map());
+        }
+        const questionCounts = matrix.get(response.question_id);
+        questionCounts.set(key, (questionCounts.get(key) || 0) + 1);
       }
     });
-    
+
     // Render analytics
     if (misconceptionsMap.size === 0) {
       misconceptionAnalytics.innerHTML = '<p class="empty-state">No misconceptions detected yet.</p>';
       return;
     }
-    
+
     const misconceptions = Array.from(misconceptionsMap.values())
       .sort((a, b) => b.count - a.count);
-    
+    const maxCount = Math.max(...misconceptions.map((item) => item.count));
+    const misconceptionCodes = misconceptions.map((item) => item.code);
+    const questionRows = questions.filter((question) => matrix.has(question.id));
+
     const html = `
       <div class="misconception-summary">
         <div class="summary-stat">
@@ -579,25 +585,42 @@ async function loadMisconceptionAnalytics() {
           <span class="stat-label">Unique Types</span>
           <span class="stat-value">${misconceptions.length}</span>
         </div>
+        <div class="summary-stat">
+          <span class="stat-label">Questions Affected</span>
+          <span class="stat-value">${questionRows.length}</span>
+        </div>
       </div>
-      <div class="misconception-list">
-        ${misconceptions
-          .map(
-            (m) => `
-          <div class="misconception-item severity-${m.severity.toLowerCase()}">
-            <div class="misconception-header">
-              <strong>${m.code}</strong>
-              <span class="severity-badge">${m.severity}</span>
-            </div>
-            <p class="misconception-stats">${m.count} detection${m.count !== 1 ? 's' : ''} • ${m.students.size} student${m.students.size !== 1 ? 's' : ''}</p>
-            <p class="misconception-feedback">${escapeHtml(m.feedback.substring(0, 150))}${m.feedback.length > 150 ? '...' : ''}</p>
-          </div>
-        `,
-          )
-          .join('')}
+      <div class="misconception-heatmap-wrap">
+        <table class="misconception-heatmap">
+          <caption>Detected misconceptions by question. Darker cells indicate more detections.</caption>
+          <thead>
+            <tr>
+              <th scope="col">Question</th>
+              ${misconceptions.map((item) => `<th scope="col" title="${escapeHtml(item.severity)} severity">${escapeHtml(item.code)}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${questionRows.map((question, questionIndex) => {
+              const questionCounts = matrix.get(question.id);
+              return `
+                <tr>
+                  <th scope="row" title="${escapeHtml(question.question_text)}">
+                    <span class="heatmap-question-number">Q${questionRows.length - questionIndex}</span>
+                    <span class="heatmap-question-text">${escapeHtml(question.question_text)}</span>
+                  </th>
+                  ${misconceptionCodes.map((code) => {
+                    const count = questionCounts.get(code) || 0;
+                    const intensity = count ? Math.max(1, Math.ceil((count / maxCount) * 5)) : 0;
+                    return `<td class="heat-cell heat-${intensity}" title="${count} detection${count === 1 ? '' : 's'} for ${escapeHtml(code)}">${count || '-'}</td>`;
+                  }).join('')}
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
       </div>
     `;
-    
+
     misconceptionAnalytics.innerHTML = html;
   } catch (error) {
     misconceptionAnalytics.innerHTML = `<p class="status-text error">Error loading misconceptions: ${error.message}</p>`;
