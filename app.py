@@ -6,6 +6,8 @@ import secrets
 import sqlite3
 import re
 import importlib
+import urllib.error
+import urllib.request
 from io import BytesIO
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,13 +25,6 @@ try:
 except ImportError:
     pass
 
-try:
-    import google.genai as genai
-except ImportError:
-    try:
-        import google.generativeai as genai
-    except ImportError:
-        genai = None
 DB_PATH = Path(os.environ.get("MICROCHECK_DB_PATH", str(BASE_DIR / "microcheck.db")))
 
 app = Flask(__name__)
@@ -53,33 +48,14 @@ except Exception as e:
     print(f"⚠ Warning: Could not initialize private Ollama model: {e}")
     slm = None
 
-# Initialize Gemini for question generation
-if genai is not None:
-    gemini_api_key = os.environ.get("GEMINI_API_KEY")
-    if gemini_api_key:
-        try:
-            # For google.genai package (new API)
-            genai_client = genai.Client(api_key=gemini_api_key)
-            gemini_client = True
-        except (AttributeError, TypeError):
-            # Fallback for google.generativeai package (old API)
-            try:
-                genai.configure(api_key=gemini_api_key)
-                gemini_client = True
-            except Exception as e:
-                gemini_client = False
-                print(f"⚠ Warning: Could not initialize Gemini: {e}")
-
-        if gemini_client:
-            print("✓ Gemini initialized for question generation")
-    else:
-        gemini_client = False
-        gemini_api_key = None
-        print("⚠ Warning: GEMINI_API_KEY not set")
+# Initialize Gemini configuration without loading an SDK into the Render worker.
+gemini_api_key = os.environ.get("GEMINI_API_KEY")
+gemini_model = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+gemini_client = bool(gemini_api_key)
+if gemini_client:
+    print("✓ Gemini configured for question generation")
 else:
-    gemini_client = False
-    gemini_api_key = None
-    print("⚠ Warning: Google Generative AI library not installed. Install with: pip install google-genai")
+    print("⚠ Warning: GEMINI_API_KEY not set")
 
 ADMIN_INSTRUCTOR_IDS = {"AMNA", "THANGAVAL", "HERMELA"}
 
@@ -433,51 +409,41 @@ def generate_questions_with_ai(text: str, max_questions: int = 10) -> list[dict]
     if not gemini_client:
         return None, "Gemini API is not configured or available. Please set GEMINI_API_KEY."
 
+    prompt = f"""Generate test questions from the provided lecture material.
+Return ONLY valid JSON - nothing else.
+Format: {{"questions":[{{"question_type":"mcq","question_text":"...","options":["A","B","C","D"]}},{{"question_type":"open_ended","question_text":"...","options":[]}}]}}
+
+Requirements:
+- Mix MCQ and open-ended questions (roughly half each)
+- Use ONLY information from the lecture material
+- MCQ: 4 options, 1 clearly correct answer, 3 plausible distractors
+- Open-ended: Ask for explanation or reasoning
+- Keep questions concise and clear
+- Make each question different
+- No trick questions, no ambiguous answers
+
+Generate exactly {max_questions} questions from this material:
+
+{text[:20000]}"""
+
     try:
-        # Check if we're using the new google.genai package with Client
-        if hasattr(genai, 'Client'):
-            # New google.genai API
-            response = genai_client.models.generate_content(
-                model="gemini-3.6-flash",
-                contents=f"""Generate test questions from the provided lecture material.
-Return ONLY valid JSON - nothing else.
-Format: {{"questions":[{{"question_type":"mcq","question_text":"...","options":["A","B","C","D"]}},{{"question_type":"open_ended","question_text":"...","options":[]}}]}}
+        payload = json.dumps({
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.7,
+                "responseMimeType": "application/json",
+            },
+        }).encode("utf-8")
+        request = urllib.request.Request(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=90) as response:
+            result = json.loads(response.read().decode("utf-8"))
 
-Requirements:
-- Mix MCQ and open-ended questions (roughly half each)
-- Use ONLY information from the lecture material
-- MCQ: 4 options, 1 clearly correct answer, 3 plausible distractors
-- Open-ended: Ask for explanation or reasoning
-- Keep questions concise and clear
-- Make each question different
-- No trick questions, no ambiguous answers
-
-Generate exactly {max_questions} questions from this material:
-
-{text[:40000]}"""
-            )
-            response_text = response.text.strip()
-        else:
-            # Old google.generativeai API
-            model = genai.GenerativeModel("gemini-3.6-flash")
-            response = model.generate_content(f"""Generate test questions from the provided lecture material.
-Return ONLY valid JSON - nothing else.
-Format: {{"questions":[{{"question_type":"mcq","question_text":"...","options":["A","B","C","D"]}},{{"question_type":"open_ended","question_text":"...","options":[]}}]}}
-
-Requirements:
-- Mix MCQ and open-ended questions (roughly half each)
-- Use ONLY information from the lecture material
-- MCQ: 4 options, 1 clearly correct answer, 3 plausible distractors
-- Open-ended: Ask for explanation or reasoning
-- Keep questions concise and clear
-- Make each question different
-- No trick questions, no ambiguous answers
-
-Generate exactly {max_questions} questions from this material:
-
-{text[:40000]}""")
-            response_text = response.text.strip()
-        
+        response_text = result["candidates"][0]["content"]["parts"][0]["text"].strip()
         question_parsed = json.loads(response_text)
         
     except json.JSONDecodeError as e:
