@@ -9,6 +9,8 @@ services:
         generateValue: true
       - key: MICROCHECK_DB_PATH
         value: /var/data/microcheck.db
+      - key: GEMINI_API_KEY
+        sync: false
     disk:
       name: microcheck-data
       mountPath: /var/data

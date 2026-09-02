@@ -69,7 +69,7 @@ microcheck/
 ## Notes
 
 - The database file `microcheck.db` is created automatically in the project root.
-- AI question generation and misconception detection use a private local Ollama service.
+- Gemini generates lecture questions, while a private local Ollama service detects misconceptions.
 - The default model is `llama3.2:1b`; set `OLLAMA_HOST`, `OLLAMA_MODEL`, and optionally `OLLAMA_TIMEOUT` to configure it.
 - Start Ollama separately and run `ollama pull llama3.2:1b` before using AI features. Student data is sent to the configured Ollama host only.
 
@@ -81,6 +81,7 @@ This project is ready to deploy on Render with a persistent disk for SQLite.
 
 - `MICROCHECK_DB_PATH` should point to `/var/data/microcheck.db` on Render.
 - `MICROCHECK_SECRET_KEY` should be set to a strong secret in production.
+- `GEMINI_API_KEY` must be added as a secret environment variable for question generation.
 - The app starts with `gunicorn app:app`.
 
 ### Render flow
