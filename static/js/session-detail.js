@@ -797,7 +797,13 @@ async function importQuestionsFromFile() {
       method: 'POST',
       body: formData,
     });
-    const data = await response.json();
+    const responseText = await response.text();
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      throw new Error(`Server returned an unexpected response (${response.status}). Please check the Render logs.`);
+    }
 
     if (!response.ok) {
       throw new Error(data.error || 'Unable to generate questions from file.');

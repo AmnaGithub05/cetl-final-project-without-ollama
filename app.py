@@ -36,6 +36,14 @@ app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
 app.secret_key = os.environ.get("MICROCHECK_SECRET_KEY", "dev-microcheck-secret-key")
 
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    if request.path.startswith("/api/"):
+        print(f"API error on {request.path}: {error}")
+        return jsonify({"error": "The server could not complete that request. Check the Render logs for details."}), 500
+    raise error
+
 # Initialize the private local Ollama model for misconception detection
 try:
     from ollama_runner import OllamaRunner
