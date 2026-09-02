@@ -24,9 +24,12 @@ except ImportError:
     pass
 
 try:
-    from openai import OpenAI
+    import google.genai as genai
 except ImportError:
-    OpenAI = None
+    try:
+        import google.generativeai as genai
+    except ImportError:
+        genai = None
 DB_PATH = Path(os.environ.get("MICROCHECK_DB_PATH", str(BASE_DIR / "microcheck.db")))
 
 app = Flask(__name__)
@@ -42,18 +45,33 @@ except Exception as e:
     print(f"⚠ Warning: Could not initialize private Ollama model: {e}")
     slm = None
 
-# Initialize ChatGPT for question generation
-if OpenAI is not None:
-    openai_api_key = os.environ.get("OPENAI_API_KEY")
-    if openai_api_key:
-        chatgpt_client = OpenAI(api_key=openai_api_key)
-        print("✓ ChatGPT (OpenAI) initialized for question generation")
+# Initialize Gemini for question generation
+if genai is not None:
+    gemini_api_key = os.environ.get("GEMINI_API_KEY")
+    if gemini_api_key:
+        try:
+            # For google.genai package (new API)
+            genai_client = genai.Client(api_key=gemini_api_key)
+            gemini_client = True
+        except (AttributeError, TypeError):
+            # Fallback for google.generativeai package (old API)
+            try:
+                genai.configure(api_key=gemini_api_key)
+                gemini_client = True
+            except Exception as e:
+                gemini_client = False
+                print(f"⚠ Warning: Could not initialize Gemini: {e}")
+
+        if gemini_client:
+            print("✓ Gemini initialized for question generation")
     else:
-        chatgpt_client = None
-        print("⚠ Warning: OPENAI_API_KEY not set")
+        gemini_client = False
+        gemini_api_key = None
+        print("⚠ Warning: GEMINI_API_KEY not set")
 else:
-    chatgpt_client = None
-    print("⚠ Warning: OpenAI library not installed. Install with: pip install openai")
+    gemini_client = False
+    gemini_api_key = None
+    print("⚠ Warning: Google Generative AI library not installed. Install with: pip install google-genai")
 
 ADMIN_INSTRUCTOR_IDS = {"AMNA", "THANGAVAL", "HERMELA"}
 
@@ -403,19 +421,19 @@ def normalize_generated_questions(items, max_questions: int) -> list[dict]:
 
 
 def generate_questions_with_ai(text: str, max_questions: int = 10) -> list[dict] | tuple[None, str]:
-    """Simple OpenAI question generation - MCQs and open-ended."""
-    if chatgpt_client is None:
-        return None, "ChatGPT (OpenAI API) is not configured or available. Please set OPENAI_API_KEY."
+    """Simple Gemini question generation - MCQs and open-ended."""
+    if not gemini_client:
+        return None, "Gemini API is not configured or available. Please set GEMINI_API_KEY."
 
     try:
-        response = chatgpt_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": """Generate test questions from the provided lecture material.
+        # Check if we're using the new google.genai package with Client
+        if hasattr(genai, 'Client'):
+            # New google.genai API
+            response = genai_client.models.generate_content(
+                model="gemini-3.6-flash",
+                contents=f"""Generate test questions from the provided lecture material.
 Return ONLY valid JSON - nothing else.
-Format: {"questions":[{"question_type":"mcq","question_text":"...","options":["A","B","C","D"]},{"question_type":"open_ended","question_text":"...","options":[]}]}
+Format: {{"questions":[{{"question_type":"mcq","question_text":"...","options":["A","B","C","D"]}},{{"question_type":"open_ended","question_text":"...","options":[]}}]}}
 
 Requirements:
 - Mix MCQ and open-ended questions (roughly half each)
@@ -424,17 +442,34 @@ Requirements:
 - Open-ended: Ask for explanation or reasoning
 - Keep questions concise and clear
 - Make each question different
-- No trick questions, no ambiguous answers"""
-                },
-                {
-                    "role": "user",
-                    "content": f"Generate exactly {max_questions} questions from this material:\n\n{text[:40000]}"
-                }
-            ],
-            temperature=0.7,
-        )
+- No trick questions, no ambiguous answers
+
+Generate exactly {max_questions} questions from this material:
+
+{text[:40000]}"""
+            )
+            response_text = response.text.strip()
+        else:
+            # Old google.generativeai API
+            model = genai.GenerativeModel("gemini-3.6-flash")
+            response = model.generate_content(f"""Generate test questions from the provided lecture material.
+Return ONLY valid JSON - nothing else.
+Format: {{"questions":[{{"question_type":"mcq","question_text":"...","options":["A","B","C","D"]}},{{"question_type":"open_ended","question_text":"...","options":[]}}]}}
+
+Requirements:
+- Mix MCQ and open-ended questions (roughly half each)
+- Use ONLY information from the lecture material
+- MCQ: 4 options, 1 clearly correct answer, 3 plausible distractors
+- Open-ended: Ask for explanation or reasoning
+- Keep questions concise and clear
+- Make each question different
+- No trick questions, no ambiguous answers
+
+Generate exactly {max_questions} questions from this material:
+
+{text[:40000]}""")
+            response_text = response.text.strip()
         
-        response_text = response.choices[0].message.content.strip()
         question_parsed = json.loads(response_text)
         
     except json.JSONDecodeError as e:
@@ -445,15 +480,17 @@ Requirements:
             if json_match:
                 question_parsed = json.loads(json_match.group(0))
             else:
-                return None, f"ChatGPT returned invalid JSON: {str(e)}"
+                return None, f"Gemini returned invalid JSON: {str(e)}"
         except Exception as parse_error:
-            return None, f"Failed to parse ChatGPT response: {parse_error}"
+            return None, f"Failed to parse Gemini response: {parse_error}"
     except Exception as error:
-        return None, f"ChatGPT API error: {error}"
+        return None, f"Gemini API error: {error}"
 
     generated_questions = normalize_generated_questions(question_parsed.get("questions"), max_questions)
     if not generated_questions:
-        return None, "ChatGPT did not return usable questions."
+        return None, "Gemini did not return usable questions."
+
+    return generated_questions
 
     return generated_questions
 
@@ -1187,15 +1224,15 @@ def import_questions_from_file(session_code: str):
         return jsonify({"error": "The uploaded file could not be read as text."}), 400
 
     generated_questions = generate_questions_with_ai(file_text, requested_count)
-    generation_source = "ChatGPT"
+    generation_source = "Gemini"
 
     if isinstance(generated_questions, tuple):
         generated_questions, error_message = generated_questions
         if generated_questions is None:
-            return jsonify({"error": error_message or "ChatGPT question generation failed."}), 400
+            return jsonify({"error": error_message or "Gemini question generation failed."}), 400
 
     if not generated_questions:
-        return jsonify({"error": "ChatGPT did not generate usable questions. Try uploading different content."}), 400
+        return jsonify({"error": "Gemini did not generate usable questions. Try uploading different content."}), 400
         generation_source = "heuristic"
 
     if not generated_questions:
