@@ -50,7 +50,7 @@ except Exception as e:
 
 # Initialize Gemini configuration without loading an SDK into the Render worker.
 gemini_api_key = os.environ.get("GEMINI_API_KEY")
-gemini_model = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+gemini_model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 gemini_client = bool(gemini_api_key)
 if gemini_client:
     print("✓ Gemini configured for question generation")
