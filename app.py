@@ -663,8 +663,12 @@ def run_misconception_comparison(question: str, answer: str, answer_key: str | N
             KeyError,
             ValueError,
             json.JSONDecodeError,
+            TimeoutError,
         ) as error:
             results[provider] = {"error_text": str(error)}
+        except Exception as error:
+            print(f"Unexpected {provider} comparison error: {error}")
+            results[provider] = {"error_text": "This service could not complete the request."}
     return results
 
 
@@ -1350,10 +1354,14 @@ def compare_session_misconceptions(session_code: str):
 
         compared = 0
         errors = 0
+        comparison_cache = {}
         for row in rows:
-            results = run_misconception_comparison(
-                row["question_text"], row["answer"], row["answer_key"]
-            )
+            cache_key = (row["question_text"], row["answer"], row["answer_key"])
+            if cache_key not in comparison_cache:
+                comparison_cache[cache_key] = run_misconception_comparison(
+                    row["question_text"], row["answer"], row["answer_key"]
+                )
+            results = comparison_cache[cache_key]
             for provider, result in results.items():
                 if result.get("error_text"):
                     errors += 1
