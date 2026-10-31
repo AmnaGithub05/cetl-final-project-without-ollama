@@ -651,7 +651,7 @@ def run_misconception_comparison(question: str, answer: str, answer_key: str | N
     results = {}
     for provider, runner in providers.items():
         if runner is None:
-            results[provider] = {"error_text": "Ollama is not initialized."}
+            results[provider] = {"error_text": "This service is not available."}
             continue
         try:
             result = normalize_comparison_result(runner())

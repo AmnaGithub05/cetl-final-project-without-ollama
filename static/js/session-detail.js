@@ -68,7 +68,10 @@ function renderModelComparison(responses) {
       return `<div class="comparison-result"><strong>${labels[provider]}</strong><span>Not run</span></div>`;
     }
     if (result.error_text) {
-      return `<div class="comparison-result"><strong>${labels[provider]}</strong><span class="status-text error">${escapeHtml(result.error_text)}</span></div>`;
+      const errorText = provider === 'ollama'
+        ? 'This service is not available.'
+        : result.error_text;
+      return `<div class="comparison-result"><strong>${labels[provider]}</strong><span class="status-text error">${escapeHtml(errorText)}</span></div>`;
     }
     const confidence = result.confidence_score == null ? '—' : `${Math.round(result.confidence_score * 100)}%`;
     return `<div class="comparison-result"><strong>${labels[provider]}</strong><span>${escapeHtml(result.misconception_code || 'No misconception')}</span><small>${escapeHtml(result.severity || '—')} · ${confidence}</small><p>${escapeHtml(result.feedback_text || '')}</p></div>`;
@@ -79,6 +82,24 @@ function renderModelComparison(responses) {
   const oldPanel = misconceptionAnalytics.querySelector('.model-comparison-grid');
   if (oldPanel) oldPanel.remove();
   misconceptionAnalytics.prepend(comparisonPanel);
+}
+
+async function readJsonResponse(response) {
+  const contentType = response.headers.get('content-type') || '';
+  const body = await response.text();
+  if (!contentType.includes('application/json')) {
+    throw new Error(
+      response.ok
+        ? 'The server returned an unexpected response.'
+        : `The server returned an error (${response.status}).`,
+    );
+  }
+
+  try {
+    return JSON.parse(body);
+  } catch (error) {
+    throw new Error(`The server returned invalid JSON (${response.status}).`);
+  }
 }
 
 function setMessage(text, type = '') {
@@ -572,7 +593,7 @@ async function runMisconceptionComparison() {
   comparisonMessage.className = 'status-text';
   try {
     const response = await fetch(`/api/instructor/sessions/${sessionCode}/compare-misconceptions`, { method: 'POST' });
-    const data = await response.json();
+    const data = await readJsonResponse(response);
     if (!response.ok) throw new Error(data.error || 'Comparison failed.');
     comparisonMessage.textContent = `Comparison complete for ${data.responses} response${data.responses === 1 ? '' : 's'} (${data.errors} provider error${data.errors === 1 ? '' : 's'}).`;
     comparisonMessage.className = `status-text ${data.errors ? 'error' : 'success'}`.trim();
@@ -595,7 +616,7 @@ async function loadMisconceptionAnalytics() {
     const responsesResponse = await fetch(`/api/instructor/sessions/${sessionCode}/responses`);
     if (!responsesResponse.ok) throw new Error('Failed to load responses');
     
-    const responsesData = await responsesResponse.json();
+    const responsesData = await readJsonResponse(responsesResponse);
     const responses = responsesData.responses || [];
     const questions = responsesData.questions || [];
     const misconceptionsMap = new Map();
