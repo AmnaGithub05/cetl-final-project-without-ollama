@@ -455,10 +455,54 @@ def gemini_model_candidates() -> list[str]:
             else str(model.get("name", ""))
             for model in models
             if "generateContent" in (model.get("supportedGenerationMethods") or [])
+            and not any(
+                excluded in str(model.get("name", "")).lower()
+                for excluded in ("embedding", "tts", "image", "veo", "robotics")
+            )
         ]
         return list(dict.fromkeys([configured_model, *available, *fallback_models]))
     except (urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError):
         return list(dict.fromkeys(fallback_models))
+
+
+def gemini_generate_json(prompt: str, temperature: float) -> tuple[dict, str]:
+    api_key, _ = get_gemini_config()
+    models_to_try = gemini_model_candidates()
+    last_error = None
+
+    for model_name in models_to_try:
+        generation_configs = [
+            {"temperature": temperature, "responseMimeType": "application/json"},
+            {"temperature": temperature},
+        ]
+        for generation_config in generation_configs:
+            payload = json.dumps({
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": generation_config,
+            }).encode("utf-8")
+            request = urllib.request.Request(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=90) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                return result, model_name
+            except urllib.error.HTTPError as error:
+                details = error.read().decode("utf-8", errors="ignore")
+                last_error = f"{error.code} for {model_name}: {details or error}"
+                if error.code == 400 and "responseMimeType" in generation_config:
+                    continue
+                if error.code == 404:
+                    break
+                raise RuntimeError(f"Gemini request failed: {last_error}") from error
+
+    raise RuntimeError(
+        f"No usable Gemini model was found. Tried: {', '.join(models_to_try)}. "
+        f"Last error: {last_error}"
+    )
 
 
 def generate_questions_with_ai(text: str, max_questions: int = 10) -> list[dict] | tuple[None, str]:
@@ -485,35 +529,7 @@ Generate exactly {max_questions} questions from this material:
 {text[:20000]}"""
 
     try:
-        payload = json.dumps({
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.7,
-                "responseMimeType": "application/json",
-            },
-        }).encode("utf-8")
-        models_to_try = gemini_model_candidates()
-        result = None
-        last_not_found = None
-        for model_name in models_to_try:
-            request = urllib.request.Request(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}",
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(request, timeout=90) as response:
-                    result = json.loads(response.read().decode("utf-8"))
-                break
-            except urllib.error.HTTPError as error:
-                if error.code != 404:
-                    raise
-                last_not_found = error
-
-        if result is None:
-            raise RuntimeError(f"No configured Gemini model was found: {last_not_found}")
-
+        result, _ = gemini_generate_json(prompt, temperature=0.7)
         response_text = result["candidates"][0]["content"]["parts"][0]["text"].strip()
         question_parsed = json.loads(response_text)
         
@@ -572,35 +588,11 @@ Use null only when the answer is correct or has no clear conceptual error. Do no
 QUESTION: {question}
 ANSWER_KEY: {answer_key or "No answer key provided"}
 STUDENT_ANSWER: {answer}"""
-    payload = json.dumps({
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"},
-    }).encode("utf-8")
-    models_to_try = gemini_model_candidates()
-    last_not_found = None
-    for model_name in models_to_try:
-        request = urllib.request.Request(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=90) as response:
-                result = json.loads(response.read().decode("utf-8"))
-            text = result["candidates"][0]["content"]["parts"][0]["text"]
-            parsed = normalize_comparison_result(json.loads(strip_code_fences(text)))
-            parsed["_model"] = model_name
-            return parsed
-        except urllib.error.HTTPError as error:
-            if error.code != 404:
-                details = error.read().decode("utf-8", errors="ignore")
-                raise RuntimeError(f"Gemini request failed for {model_name}: {details or error}") from error
-            last_not_found = error
-
-    raise RuntimeError(
-        f"No configured Gemini model was found. Tried: {', '.join(models_to_try)} ({last_not_found})"
-    )
+    result, model_name = gemini_generate_json(prompt, temperature=0.2)
+    text = result["candidates"][0]["content"]["parts"][0]["text"]
+    parsed = normalize_comparison_result(json.loads(strip_code_fences(text)))
+    parsed["_model"] = model_name
+    return parsed
 
 
 def compare_with_claude(question: str, answer: str, answer_key: str | None) -> dict:
