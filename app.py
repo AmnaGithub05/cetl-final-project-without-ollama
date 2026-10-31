@@ -577,6 +577,20 @@ def normalize_comparison_result(parsed: dict) -> dict:
     }
 
 
+def parse_model_json(text: str) -> dict:
+    cleaned = strip_code_fences(text)
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+        if not match:
+            raise
+        parsed = json.loads(match.group(0))
+    if not isinstance(parsed, dict):
+        raise ValueError("Model response JSON must be an object.")
+    return parsed
+
+
 def compare_with_gemini(question: str, answer: str, answer_key: str | None) -> dict:
     api_key, _ = get_gemini_config()
     if not api_key:
@@ -590,7 +604,7 @@ ANSWER_KEY: {answer_key or "No answer key provided"}
 STUDENT_ANSWER: {answer}"""
     result, model_name = gemini_generate_json(prompt, temperature=0.2)
     text = result["candidates"][0]["content"]["parts"][0]["text"]
-    parsed = normalize_comparison_result(json.loads(strip_code_fences(text)))
+    parsed = normalize_comparison_result(parse_model_json(text))
     parsed["_model"] = model_name
     return parsed
 
@@ -624,7 +638,7 @@ STUDENT_ANSWER: {answer}"""
     with urllib.request.urlopen(request, timeout=90) as response:
         result = json.loads(response.read().decode("utf-8"))
     text = result["content"][0]["text"]
-    return normalize_comparison_result(json.loads(strip_code_fences(text)))
+    return normalize_comparison_result(parse_model_json(text))
 
 
 def run_misconception_comparison(question: str, answer: str, answer_key: str | None) -> dict:
@@ -642,7 +656,14 @@ def run_misconception_comparison(question: str, answer: str, answer_key: str | N
         try:
             result = normalize_comparison_result(runner())
             results[provider] = result
-        except (RuntimeError, urllib.error.HTTPError, urllib.error.URLError, KeyError, json.JSONDecodeError) as error:
+        except (
+            RuntimeError,
+            urllib.error.HTTPError,
+            urllib.error.URLError,
+            KeyError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as error:
             results[provider] = {"error_text": str(error)}
     return results
 
