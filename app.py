@@ -21,7 +21,7 @@ BASE_DIR = Path(__file__).resolve().parent
 # Load environment variables from .env file
 try:
     from dotenv import load_dotenv
-    load_dotenv(BASE_DIR / ".env")
+    load_dotenv(BASE_DIR / ".env", override=True)
 except ImportError:
     pass
 
@@ -49,13 +49,21 @@ except Exception as e:
     slm = None
 
 # Initialize Gemini configuration without loading an SDK into the Render worker.
-gemini_api_key = os.environ.get("GEMINI_API_KEY")
-gemini_model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+def get_gemini_config() -> tuple[str | None, str]:
+    return (
+        os.environ.get("GEMINI_API_KEY"),
+        os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+    )
+
+
+gemini_api_key, gemini_model = get_gemini_config()
 gemini_client = bool(gemini_api_key)
 if gemini_client:
     print("✓ Gemini configured for question generation")
 else:
     print("⚠ Warning: GEMINI_API_KEY not set")
+anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
+anthropic_model = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-haiku-latest")
 
 ADMIN_INSTRUCTOR_IDS = {"AMNA", "THANGAVAL", "HERMELA"}
 
@@ -188,6 +196,24 @@ def init_db() -> None:
                 severity TEXT,
                 feedback_text TEXT,
                 detected_at TEXT NOT NULL,
+                FOREIGN KEY (response_id) REFERENCES responses(id) ON DELETE CASCADE
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS misconception_comparisons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                response_id INTEGER NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                misconception_code TEXT,
+                confidence_score REAL,
+                severity TEXT,
+                feedback_text TEXT,
+                error_text TEXT,
+                compared_at TEXT NOT NULL,
+                UNIQUE(response_id, provider),
                 FOREIGN KEY (response_id) REFERENCES responses(id) ON DELETE CASCADE
             )
             """
@@ -404,9 +430,41 @@ def normalize_generated_questions(items, max_questions: int) -> list[dict]:
     return normalized_questions
 
 
+def gemini_model_candidates() -> list[str]:
+    api_key, configured_model = get_gemini_config()
+    fallback_models = [
+        configured_model,
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
+    ]
+    if not api_key:
+        return list(dict.fromkeys(fallback_models))
+
+    request = urllib.request.Request(
+        f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}",
+        headers={"Accept": "application/json"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            models = json.loads(response.read().decode("utf-8")).get("models", [])
+        available = [
+            str(model.get("name", ""))[7:]
+            if str(model.get("name", "")).startswith("models/")
+            else str(model.get("name", ""))
+            for model in models
+            if "generateContent" in (model.get("supportedGenerationMethods") or [])
+        ]
+        return list(dict.fromkeys([configured_model, *available, *fallback_models]))
+    except (urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError):
+        return list(dict.fromkeys(fallback_models))
+
+
 def generate_questions_with_ai(text: str, max_questions: int = 10) -> list[dict] | tuple[None, str]:
     """Simple Gemini question generation - MCQs and open-ended."""
-    if not gemini_client:
+    api_key, _ = get_gemini_config()
+    if not api_key:
         return None, "Gemini API is not configured or available. Please set GEMINI_API_KEY."
 
     prompt = f"""Generate test questions from the provided lecture material.
@@ -434,16 +492,12 @@ Generate exactly {max_questions} questions from this material:
                 "responseMimeType": "application/json",
             },
         }).encode("utf-8")
-        models_to_try = list(dict.fromkeys([
-            gemini_model,
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
-        ]))
+        models_to_try = gemini_model_candidates()
         result = None
         last_not_found = None
         for model_name in models_to_try:
             request = urllib.request.Request(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={gemini_api_key}",
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}",
                 data=payload,
                 headers={"Content-Type": "application/json"},
                 method="POST",
@@ -484,6 +538,121 @@ Generate exactly {max_questions} questions from this material:
     return generated_questions
 
     return generated_questions
+
+
+def normalize_comparison_result(parsed: dict) -> dict:
+    confidence = parsed.get("confidence_score")
+    try:
+        confidence = max(0.0, min(1.0, float(confidence))) if confidence is not None else None
+    except (TypeError, ValueError):
+        confidence = None
+
+    severity = parsed.get("severity")
+    severity = severity.upper() if isinstance(severity, str) else None
+    if severity not in {"HIGH", "MEDIUM", "LOW", None}:
+        severity = None
+
+    code = parsed.get("misconception_code")
+    return {
+        "misconception_code": str(code).strip() if code else None,
+        "confidence_score": confidence,
+        "severity": severity,
+        "feedback_text": str(parsed.get("slm_feedback") or parsed.get("feedback") or "").strip(),
+    }
+
+
+def compare_with_gemini(question: str, answer: str, answer_key: str | None) -> dict:
+    api_key, _ = get_gemini_config()
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not configured.")
+    prompt = f"""Analyze the student's answer for a conceptual misconception.
+Return ONLY valid JSON with exactly these fields:
+{{"misconception_code": string or null, "confidence_score": number between 0 and 1, "severity": "HIGH" or "MEDIUM" or "LOW" or null, "feedback": string}}
+Use null only when the answer is correct or has no clear conceptual error. Do not require word-for-word agreement with the answer key.
+QUESTION: {question}
+ANSWER_KEY: {answer_key or "No answer key provided"}
+STUDENT_ANSWER: {answer}"""
+    payload = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"},
+    }).encode("utf-8")
+    models_to_try = gemini_model_candidates()
+    last_not_found = None
+    for model_name in models_to_try:
+        request = urllib.request.Request(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            text = result["candidates"][0]["content"]["parts"][0]["text"]
+            parsed = normalize_comparison_result(json.loads(strip_code_fences(text)))
+            parsed["_model"] = model_name
+            return parsed
+        except urllib.error.HTTPError as error:
+            if error.code != 404:
+                details = error.read().decode("utf-8", errors="ignore")
+                raise RuntimeError(f"Gemini request failed for {model_name}: {details or error}") from error
+            last_not_found = error
+
+    raise RuntimeError(
+        f"No configured Gemini model was found. Tried: {', '.join(models_to_try)} ({last_not_found})"
+    )
+
+
+def compare_with_claude(question: str, answer: str, answer_key: str | None) -> dict:
+    if not anthropic_api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY is not configured.")
+    prompt = f"""Analyze the student's answer for a conceptual misconception.
+Return ONLY valid JSON with exactly these fields:
+{{"misconception_code": string or null, "confidence_score": number between 0 and 1, "severity": "HIGH" or "MEDIUM" or "LOW" or null, "feedback": string}}
+Use null only when the answer is correct or has no clear conceptual error. Do not require word-for-word agreement with the answer key.
+QUESTION: {question}
+ANSWER_KEY: {answer_key or "No answer key provided"}
+STUDENT_ANSWER: {answer}"""
+    payload = json.dumps({
+        "model": anthropic_model,
+        "max_tokens": 500,
+        "temperature": 0.2,
+        "messages": [{"role": "user", "content": prompt}],
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": anthropic_api_key,
+            "anthropic-version": "2023-06-01",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=90) as response:
+        result = json.loads(response.read().decode("utf-8"))
+    text = result["content"][0]["text"]
+    return normalize_comparison_result(json.loads(strip_code_fences(text)))
+
+
+def run_misconception_comparison(question: str, answer: str, answer_key: str | None) -> dict:
+    providers = {
+        "ollama": (lambda: slm.predict_misconception(question, answer, answer_key=answer_key))
+        if slm is not None else None,
+        "claude": lambda: compare_with_claude(question, answer, answer_key),
+        "gemini": lambda: compare_with_gemini(question, answer, answer_key),
+    }
+    results = {}
+    for provider, runner in providers.items():
+        if runner is None:
+            results[provider] = {"error_text": "Ollama is not initialized."}
+            continue
+        try:
+            result = normalize_comparison_result(runner())
+            results[provider] = result
+        except (RuntimeError, urllib.error.HTTPError, urllib.error.URLError, KeyError, json.JSONDecodeError) as error:
+            results[provider] = {"error_text": str(error)}
+    return results
 
 
 def generate_session_code() -> str:
@@ -1071,6 +1240,18 @@ def get_session_responses(session_code: str):
             """,
             (session["session_code"],),
         ).fetchall()
+        comparison_rows = db.execute(
+            """
+            SELECT response_id, provider, model, misconception_code, confidence_score,
+                   severity, feedback_text, error_text, compared_at
+            FROM misconception_comparisons
+            WHERE response_id IN (
+                SELECT id FROM responses WHERE session_code = ?
+            )
+            ORDER BY compared_at DESC, id DESC
+            """,
+            (session["session_code"],),
+        ).fetchall()
 
         questions = db.execute(
             """
@@ -1105,6 +1286,7 @@ def get_session_responses(session_code: str):
             ],
             "responses": [
                 {
+                    "id": row["id"],
                     "student_id": row["student_id"],
                     "answer": row["answer"],
                     "justification": row["justification"],
@@ -1115,11 +1297,87 @@ def get_session_responses(session_code: str):
                     "misconception_code": row["misconception_code"],
                     "misconception_severity": row["misconception_severity"],
                     "misconception_feedback": row["misconception_feedback"],
+                    "comparisons": [
+                        {
+                            "provider": comparison["provider"],
+                            "model": comparison["model"],
+                            "misconception_code": comparison["misconception_code"],
+                            "confidence_score": comparison["confidence_score"],
+                            "severity": comparison["severity"],
+                            "feedback_text": comparison["feedback_text"],
+                            "error_text": comparison["error_text"],
+                            "compared_at": comparison["compared_at"],
+                        }
+                        for comparison in comparison_rows
+                        if comparison["response_id"] == row["id"]
+                    ],
                 }
                 for row in responses
             ],
         }
     )
+
+
+@app.post("/api/instructor/sessions/<session_code>/compare-misconceptions")
+@instructor_session_access_required
+def compare_session_misconceptions(session_code: str):
+    with get_db() as db:
+        rows = db.execute(
+            """
+            SELECT r.id, r.answer, q.question_text, q.answer_key
+            FROM responses AS r
+            JOIN session_questions AS q ON q.id = r.question_id
+            WHERE r.session_code = ?
+            ORDER BY r.id ASC
+            """,
+            (session_code.upper(),),
+        ).fetchall()
+        if not rows:
+            return jsonify({"error": "There are no responses to compare yet."}), 400
+
+        compared = 0
+        errors = 0
+        for row in rows:
+            results = run_misconception_comparison(
+                row["question_text"], row["answer"], row["answer_key"]
+            )
+            for provider, result in results.items():
+                if result.get("error_text"):
+                    errors += 1
+                db.execute(
+                    """
+                    INSERT INTO misconception_comparisons
+                    (response_id, provider, model, misconception_code, confidence_score,
+                     severity, feedback_text, error_text, compared_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(response_id, provider) DO UPDATE SET
+                        model = excluded.model,
+                        misconception_code = excluded.misconception_code,
+                        confidence_score = excluded.confidence_score,
+                        severity = excluded.severity,
+                        feedback_text = excluded.feedback_text,
+                        error_text = excluded.error_text,
+                        compared_at = excluded.compared_at
+                    """,
+                    (
+                        row["id"],
+                        provider,
+                        result.get("_model") or {
+                            "ollama": slm.model if slm else "unavailable",
+                            "claude": anthropic_model,
+                            "gemini": gemini_model,
+                        }[provider],
+                        result.get("misconception_code"),
+                        result.get("confidence_score"),
+                        result.get("severity"),
+                        result.get("feedback_text"),
+                        result.get("error_text"),
+                        utc_now(),
+                    ),
+                )
+                compared += 1
+        db.commit()
+    return jsonify({"message": "Model comparison completed.", "responses": len(rows), "results": compared, "errors": errors})
 
 
 @app.get("/health")
@@ -1519,4 +1777,4 @@ def admin_delete_question(question_id: int):
 if __name__ == "__main__":
     init_db()
     port = int(os.environ.get("PORT", 5000))
-    app.run(debug=True, host="127.0.0.1", port=port)
+    app.run(debug=True, host="0.0.0.0", port=port)

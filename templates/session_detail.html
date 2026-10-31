@@ -159,10 +159,13 @@
   <div class="panel-head">
     <div>
       <p class="section-label">AI Misconception Detection</p>
-      <h3>Misconceptions detected by SLM</h3>
+      <h3>Misconception model comparison</h3>
     </div>
+    <button id="compare-misconceptions-btn" class="btn btn-primary" type="button">Run Ollama / Claude / Gemini comparison</button>
   </div>
 
+  <p class="panel-copy">Run the same student responses through all configured models. This is instructor-triggered so normal submissions stay fast.</p>
+  <p id="comparison-message" class="status-text"></p>
   <div id="misconception-analytics" class="misconception-analytics">
     <p class="status-text">Loading misconception data...</p>
   </div>
@@ -190,36 +193,6 @@
     <p id="answer-key-message" class="status-text"></p>
   </div>
 </div>
-
-<section class="card panel panel-table session-responses-panel">
-  <div class="panel-head">
-    <div>
-      <p class="section-label">Live responses</p>
-      <h3>Student submissions across the session</h3>
-    </div>
-  </div>
-
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Question</th>
-          <th>Type</th>
-          <th>Student ID</th>
-          <th>Answer</th>
-          <th>Justification</th>
-          <th>Misconception</th>
-          <th>Time</th>
-        </tr>
-      </thead>
-      <tbody id="responses-table-body">
-        <tr>
-          <td colspan="7" class="empty-state">No responses yet. Share the session code with students.</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-</section>
 
 <section class="card panel heatmap-card">
   <div class="panel-head">

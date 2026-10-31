@@ -72,6 +72,7 @@ microcheck/
 - Gemini generates lecture questions, while a private local Ollama service detects misconceptions.
 - The default model is `llama3.2:1b`; set `OLLAMA_HOST`, `OLLAMA_MODEL`, and optionally `OLLAMA_TIMEOUT` to configure it.
 - Start Ollama separately and run `ollama pull llama3.2:1b` before using AI features. Student data is sent to the configured Ollama host only.
+- In an instructor session, use **Run Ollama / Claude / Gemini comparison** to compare the same submitted responses across all three models. This is on demand and stores separate results in SQLite. Set `ANTHROPIC_API_KEY` and optionally `ANTHROPIC_MODEL` to enable Claude; `GEMINI_API_KEY` enables Gemini. Missing providers are reported without blocking the other models.
 
 ## Permanent Deployment
 

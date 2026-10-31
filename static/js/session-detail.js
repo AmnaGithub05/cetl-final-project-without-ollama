@@ -40,10 +40,46 @@ const answerKeyModalTitle = document.getElementById('answer-key-modal-title');
 const answerKeyModalQuestion = document.getElementById('answer-key-modal-question');
 const answerKeyMessage = document.getElementById('answer-key-message');
 const misconceptionAnalytics = document.getElementById('misconception-analytics');
+const compareMisconceptionsBtn = document.getElementById('compare-misconceptions-btn');
+const comparisonMessage = document.getElementById('comparison-message');
 
 let refreshTimer = null;
 let sessionQuestionChartGroups = [];
 let currentQuestionIdForAnswerKey = null;
+let selectedMisconceptionCode = null;
+let selectedMisconceptionQuestionId = null;
+let selectedMisconceptionScrollTop = 0;
+
+function renderModelComparison(responses) {
+  const comparisonRows = (responses || []).flatMap((response) =>
+    (response.comparisons || []).map((comparison) => ({ ...comparison, response })),
+  );
+  const providers = ['ollama', 'claude', 'gemini'];
+  const latestByProvider = new Map();
+  comparisonRows.forEach((row) => {
+    if (!latestByProvider.has(row.provider)) {
+      latestByProvider.set(row.provider, row);
+    }
+  });
+  const labels = { ollama: 'Ollama', claude: 'Claude', gemini: 'Gemini' };
+  const html = providers.map((provider) => {
+    const result = latestByProvider.get(provider);
+    if (!result) {
+      return `<div class="comparison-result"><strong>${labels[provider]}</strong><span>Not run</span></div>`;
+    }
+    if (result.error_text) {
+      return `<div class="comparison-result"><strong>${labels[provider]}</strong><span class="status-text error">${escapeHtml(result.error_text)}</span></div>`;
+    }
+    const confidence = result.confidence_score == null ? '—' : `${Math.round(result.confidence_score * 100)}%`;
+    return `<div class="comparison-result"><strong>${labels[provider]}</strong><span>${escapeHtml(result.misconception_code || 'No misconception')}</span><small>${escapeHtml(result.severity || '—')} · ${confidence}</small><p>${escapeHtml(result.feedback_text || '')}</p></div>`;
+  }).join('');
+  const comparisonPanel = document.createElement('div');
+  comparisonPanel.className = 'model-comparison-grid';
+  comparisonPanel.innerHTML = html;
+  const oldPanel = misconceptionAnalytics.querySelector('.model-comparison-grid');
+  if (oldPanel) oldPanel.remove();
+  misconceptionAnalytics.prepend(comparisonPanel);
+}
 
 function setMessage(text, type = '') {
   dashboardMessage.textContent = text;
@@ -529,8 +565,33 @@ async function saveAnswerKey(event) {
 }
 
 // Misconception Analytics Functions
+async function runMisconceptionComparison() {
+  if (!compareMisconceptionsBtn) return;
+  compareMisconceptionsBtn.disabled = true;
+  comparisonMessage.textContent = 'Comparing responses with all three models. This can take a moment...';
+  comparisonMessage.className = 'status-text';
+  try {
+    const response = await fetch(`/api/instructor/sessions/${sessionCode}/compare-misconceptions`, { method: 'POST' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Comparison failed.');
+    comparisonMessage.textContent = `Comparison complete for ${data.responses} response${data.responses === 1 ? '' : 's'} (${data.errors} provider error${data.errors === 1 ? '' : 's'}).`;
+    comparisonMessage.className = `status-text ${data.errors ? 'error' : 'success'}`.trim();
+    await loadMisconceptionAnalytics();
+  } catch (error) {
+    comparisonMessage.textContent = error.message;
+    comparisonMessage.className = 'status-text error';
+  } finally {
+    compareMisconceptionsBtn.disabled = false;
+  }
+}
+
 async function loadMisconceptionAnalytics() {
   try {
+    const existingResponseList = misconceptionAnalytics.querySelector('.misconception-response-list');
+    if (existingResponseList) {
+      selectedMisconceptionScrollTop = existingResponseList.scrollTop;
+    }
+
     const responsesResponse = await fetch(`/api/instructor/sessions/${sessionCode}/responses`);
     if (!responsesResponse.ok) throw new Error('Failed to load responses');
     
@@ -550,10 +611,13 @@ async function loadMisconceptionAnalytics() {
             code: response.misconception_code,
             severity: response.misconception_severity || 'UNKNOWN',
             count: 0,
+            responses: [],
           });
         }
+
         const item = misconceptionsMap.get(key);
         item.count++;
+        item.responses.push(response);
 
         if (!matrix.has(response.question_id)) {
           matrix.set(response.question_id, new Map());
@@ -563,17 +627,20 @@ async function loadMisconceptionAnalytics() {
       }
     });
 
+    renderModelComparison(responses);
+
     // Render analytics
     if (misconceptionsMap.size === 0) {
       misconceptionAnalytics.innerHTML = '<p class="empty-state">No misconceptions detected yet.</p>';
+      renderModelComparison(responses);
       return;
     }
 
     const misconceptions = Array.from(misconceptionsMap.values())
       .sort((a, b) => b.count - a.count);
-    const maxCount = Math.max(...misconceptions.map((item) => item.count));
     const misconceptionCodes = misconceptions.map((item) => item.code);
     const questionRows = questions.filter((question) => matrix.has(question.id));
+    const maxCount = Math.max(...misconceptions.map((item) => item.count));
 
     const html = `
       <div class="misconception-summary">
@@ -583,7 +650,7 @@ async function loadMisconceptionAnalytics() {
         </div>
         <div class="summary-stat">
           <span class="stat-label">Unique Types</span>
-          <span class="stat-value">${misconceptions.length}</span>
+          <button type="button" class="summary-stat-button misconception-detail-btn" data-misconception-code="__all__">${misconceptions.length}</button>
         </div>
         <div class="summary-stat">
           <span class="stat-label">Questions Affected</span>
@@ -596,7 +663,7 @@ async function loadMisconceptionAnalytics() {
           <thead>
             <tr>
               <th scope="col">Question</th>
-              ${misconceptions.map((item) => `<th scope="col" title="${escapeHtml(item.severity)} severity">${escapeHtml(item.code)}</th>`).join('')}
+              ${misconceptions.map((item) => `<th scope="col" title="${escapeHtml(item.severity)} severity"><button type="button" class="misconception-detail-btn" data-misconception-code="${escapeHtml(item.code)}">${escapeHtml(item.code)}</button></th>`).join('')}
             </tr>
           </thead>
           <tbody>
@@ -611,7 +678,7 @@ async function loadMisconceptionAnalytics() {
                   ${misconceptionCodes.map((code) => {
                     const count = questionCounts.get(code) || 0;
                     const intensity = count ? Math.max(1, Math.ceil((count / maxCount) * 5)) : 0;
-                    return `<td class="heat-cell heat-${intensity}" title="${count} detection${count === 1 ? '' : 's'} for ${escapeHtml(code)}">${count || '-'}</td>`;
+                    return `<td class="heat-cell heat-${intensity}" title="${count} detection${count === 1 ? '' : 's'} for ${escapeHtml(code)}">${count ? `<button type="button" class="misconception-detail-btn heat-cell-button" data-misconception-code="${escapeHtml(code)}" data-question-id="${question.id}">${count}</button>` : '-'}</td>`;
                   }).join('')}
                 </tr>
               `;
@@ -619,9 +686,65 @@ async function loadMisconceptionAnalytics() {
           </tbody>
         </table>
       </div>
+      <div id="misconception-details" class="misconception-details" aria-live="polite">
+        <p class="empty-state">Select a misconception code or heatmap cell to inspect Ollama's findings.</p>
+      </div>
     `;
 
     misconceptionAnalytics.innerHTML = html;
+    renderModelComparison(responses);
+    misconceptionAnalytics.querySelectorAll('.misconception-detail-btn').forEach((button) => {
+      const showDetails = (shouldScroll = true) => {
+        const selectedCode = button.dataset.misconceptionCode;
+        const selectedQuestionId = button.dataset.questionId;
+        selectedMisconceptionCode = selectedCode;
+        selectedMisconceptionQuestionId = selectedQuestionId || null;
+        const selected = selectedCode === '__all__'
+          ? {
+            code: 'All unique types',
+            severity: 'Multiple',
+            responses: misconceptions.flatMap((item) => item.responses),
+          }
+          : misconceptionsMap.get(selectedCode);
+        const selectedResponses = selected.responses.filter((response) => {
+          const matchesQuestion = !selectedQuestionId || String(response.question_id) === selectedQuestionId;
+          return matchesQuestion;
+        });
+        const details = misconceptionAnalytics.querySelector('#misconception-details');
+        details.innerHTML = `
+          <div class="misconception-details-head">
+            <div>
+              <p class="section-label">Theoretical analysis</p>
+              <h4>${escapeHtml(selected.code)}</h4>
+            </div>
+            <span class="severity-badge">${escapeHtml(selected.severity)}</span>
+          </div>
+          <p class="misconception-details-count">${selectedResponses.length} affected response${selectedResponses.length === 1 ? '' : 's'}</p>
+          <div class="misconception-response-list">
+            ${selectedResponses.map((response) => `
+              <article class="misconception-response">
+                <p><strong>${escapeHtml(response.student_id)}</strong> · ${escapeHtml(response.question_text || 'Question removed')}</p>
+                <p><strong>Answer:</strong> ${escapeHtml(response.answer)}</p>
+                ${response.misconception_feedback ? `<p class="misconception-feedback">${escapeHtml(response.misconception_feedback)}</p>` : ''}
+              </article>
+            `).join('')}
+          </div>
+        `;
+        const responseList = details.querySelector('.misconception-response-list');
+        responseList.scrollTop = shouldScroll ? 0 : selectedMisconceptionScrollTop;
+        if (shouldScroll) {
+          details.scrollIntoView({ behavior: 'auto', block: 'start' });
+        }
+      };
+      button.addEventListener('click', showDetails);
+
+      if (
+        button.dataset.misconceptionCode === selectedMisconceptionCode
+        && (button.dataset.questionId || null) === selectedMisconceptionQuestionId
+      ) {
+        showDetails(false);
+      }
+    });
   } catch (error) {
     misconceptionAnalytics.innerHTML = `<p class="status-text error">Error loading misconceptions: ${error.message}</p>`;
   }
@@ -681,26 +804,16 @@ function renderQuestions(questions) {
 }
 
 function renderResponses(responses) {
+  if (!responsesTableBody) {
+    return;
+  }
+
   if (!responses.length) {
     responsesTableBody.innerHTML = '<tr><td colspan="7" class="empty-state">No responses yet. Share the session code with students.</td></tr>';
     return;
   }
 
-  responsesTableBody.innerHTML = responses
-    .map(
-      (response) => `
-        <tr>
-          <td>${response.question_text || 'Question removed'}</td>
-          <td>${formatQuestionType(response.question_type)}</td>
-          <td><strong>${response.student_id}</strong></td>
-          <td>${response.answer}</td>
-          <td>${response.justification}</td>
-          <td>${response.misconception_code ? `<span class="misconception-tag">${response.misconception_code}</span>` : '-'}</td>
-          <td>${formatTime(response.submitted_at)}</td>
-        </tr>
-      `,
-    )
-    .join('');
+  responsesTableBody.innerHTML = '';
 }
 
 async function loadSessionData() {
@@ -842,6 +955,9 @@ questionTypeInput.addEventListener('change', () => {
 });
 
 refreshBtn.addEventListener('click', loadSessionData);
+if (compareMisconceptionsBtn) {
+  compareMisconceptionsBtn.addEventListener('click', runMisconceptionComparison);
+}
 
 // Answer Key Modal Event Listeners
 answerKeyForm.addEventListener('submit', saveAnswerKey);
