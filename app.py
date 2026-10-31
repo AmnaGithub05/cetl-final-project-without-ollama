@@ -26,6 +26,7 @@ except ImportError:
     pass
 
 DB_PATH = Path(os.environ.get("MICROCHECK_DB_PATH", str(BASE_DIR / "microcheck.db")))
+print(f"MicroCheck database path: {DB_PATH}")
 
 app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False

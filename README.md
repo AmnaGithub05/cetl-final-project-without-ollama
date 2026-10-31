@@ -83,6 +83,7 @@ This project is ready to deploy on Render with a persistent disk for SQLite.
 - `MICROCHECK_DB_PATH` should point to `/var/data/microcheck.db` on Render.
 - `MICROCHECK_SECRET_KEY` should be set to a strong secret in production.
 - `GEMINI_API_KEY` must be added as a secret environment variable for question generation.
+- `ANTHROPIC_API_KEY` must be added as a secret environment variable for Claude comparison.
 - The app starts with `gunicorn app:app`.
 
 ### Render flow
@@ -90,4 +91,5 @@ This project is ready to deploy on Render with a persistent disk for SQLite.
 1. Push the repo to GitHub.
 2. Create a new Web Service on Render and connect the repo.
 3. Use the included `render.yaml` or set the same values manually.
-4. Add the persistent disk so the SQLite database survives restarts.
+4. In the live Render service, open **Disks** and attach a persistent disk named `microcheck-data` mounted at `/var/data` (1 GB or larger). A disk declared only in the repository does not attach to an already-created manual service.
+5. Confirm the deploy logs print `MicroCheck database path: /var/data/microcheck.db`.
