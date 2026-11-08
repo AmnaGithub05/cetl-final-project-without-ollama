@@ -44,9 +44,9 @@ def handle_unexpected_error(error):
 try:
     from ollama_runner import OllamaRunner
     slm = OllamaRunner()
-    print(f"✓ Private Ollama model initialized: {slm.model}")
+    print(f"[OK] Private Ollama model initialized: {slm.model}")
 except Exception as e:
-    print(f"⚠ Warning: Could not initialize private Ollama model: {e}")
+    print(f"[WARN] Could not initialize private Ollama model: {e}")
     slm = None
 
 # Initialize Gemini configuration without loading an SDK into the Render worker.
@@ -60,9 +60,9 @@ def get_gemini_config() -> tuple[str | None, str]:
 gemini_api_key, gemini_model = get_gemini_config()
 gemini_client = bool(gemini_api_key)
 if gemini_client:
-    print("✓ Gemini configured for question generation")
+    print("[OK] Gemini configured for question generation")
 else:
-    print("⚠ Warning: GEMINI_API_KEY not set")
+    print("[WARN] GEMINI_API_KEY not set")
 anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
 anthropic_model = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-haiku-latest")
 
