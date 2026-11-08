@@ -68,9 +68,14 @@ function renderModelComparison(responses) {
       return `<div class="comparison-result"><strong>${labels[provider]}</strong><span>Not run</span></div>`;
     }
     if (result.error_text) {
+      const rawErrorText = String(result.error_text);
+      const isGeminiQuotaError = provider === 'gemini'
+        && (/429|quota|resource_exhausted/i.test(rawErrorText));
       const errorText = provider === 'ollama'
         ? 'This service is not available.'
-        : result.error_text;
+        : isGeminiQuotaError
+          ? 'Gemini daily free-tier quota reached. Try again after the quota resets, or run another provider.'
+          : rawErrorText;
       return `<div class="comparison-result"><strong>${labels[provider]}</strong><span class="status-text error">${escapeHtml(errorText)}</span></div>`;
     }
     const confidence = result.confidence_score == null ? '—' : `${Math.round(result.confidence_score * 100)}%`;

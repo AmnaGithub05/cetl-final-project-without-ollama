@@ -672,6 +672,15 @@ def run_provider_comparison(provider: str, question: str, answer: str, answer_ke
         return {"error_text": "This service could not complete the request."}
 
 
+def is_non_retryable_provider_error(result: dict) -> bool:
+    error_text = str(result.get("error_text") or "").lower()
+    return (
+        "429" in error_text
+        or "quota" in error_text
+        or "resource_exhausted" in error_text
+    )
+
+
 def run_misconception_comparison(question: str, answer: str, answer_key: str | None) -> dict:
     providers = misconception_provider_runners(question, answer, answer_key)
     results = {}
@@ -1435,6 +1444,7 @@ def compare_session_misconceptions_provider(session_code: str, provider: str):
         compared = 0
         errors = 0
         comparison_cache = {}
+        provider_error = None
         model_name = {
             "ollama": slm.model if slm else "unavailable",
             "claude": anthropic_model,
@@ -1444,10 +1454,16 @@ def compare_session_misconceptions_provider(session_code: str, provider: str):
         for row in rows:
             cache_key = (row["question_text"], row["answer"], row["answer_key"])
             if cache_key not in comparison_cache:
-                comparison_cache[cache_key] = run_provider_comparison(
-                    provider, row["question_text"], row["answer"], row["answer_key"]
+                comparison_cache[cache_key] = (
+                    provider_error
+                    if provider_error is not None
+                    else run_provider_comparison(
+                        provider, row["question_text"], row["answer"], row["answer_key"]
+                    )
                 )
             result = comparison_cache[cache_key]
+            if provider_error is None and is_non_retryable_provider_error(result):
+                provider_error = result
             if result.get("error_text"):
                 errors += 1
             db.execute(
