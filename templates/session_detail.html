@@ -161,10 +161,14 @@
       <p class="section-label">AI Misconception Detection</p>
       <h3>Misconception model comparison</h3>
     </div>
-    <button id="compare-misconceptions-btn" class="btn btn-primary" type="button">Run Ollama / Claude / Gemini comparison</button>
+    <div class="comparison-actions">
+      <button class="btn btn-primary compare-provider-btn" data-provider="ollama" type="button">Run Ollama</button>
+      <button class="btn btn-primary compare-provider-btn" data-provider="claude" type="button">Run Claude</button>
+      <button class="btn btn-primary compare-provider-btn" data-provider="gemini" type="button">Run Gemini</button>
+    </div>
   </div>
 
-  <p class="panel-copy">Run the same student responses through all configured models. This is instructor-triggered so normal submissions stay fast.</p>
+  <p class="panel-copy">Run each model independently when needed. A slow or unavailable provider will not block the others.</p>
   <p id="comparison-message" class="status-text"></p>
   <div id="misconception-analytics" class="misconception-analytics">
     <p class="status-text">Loading misconception data...</p>

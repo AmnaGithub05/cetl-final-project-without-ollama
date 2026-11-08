@@ -40,7 +40,7 @@ const answerKeyModalTitle = document.getElementById('answer-key-modal-title');
 const answerKeyModalQuestion = document.getElementById('answer-key-modal-question');
 const answerKeyMessage = document.getElementById('answer-key-message');
 const misconceptionAnalytics = document.getElementById('misconception-analytics');
-const compareMisconceptionsBtn = document.getElementById('compare-misconceptions-btn');
+const compareProviderButtons = document.querySelectorAll('.compare-provider-btn');
 const comparisonMessage = document.getElementById('comparison-message');
 
 let refreshTimer = null;
@@ -586,23 +586,22 @@ async function saveAnswerKey(event) {
 }
 
 // Misconception Analytics Functions
-async function runMisconceptionComparison() {
-  if (!compareMisconceptionsBtn) return;
-  compareMisconceptionsBtn.disabled = true;
-  comparisonMessage.textContent = 'Comparing responses with all three models. This can take a moment...';
+async function runProviderComparison(provider, button) {
+  button.disabled = true;
+  comparisonMessage.textContent = `Running ${provider} misconception detection. This can take a moment...`;
   comparisonMessage.className = 'status-text';
   try {
-    const response = await fetch(`/api/instructor/sessions/${sessionCode}/compare-misconceptions`, { method: 'POST' });
+    const response = await fetch(`/api/instructor/sessions/${sessionCode}/compare-misconceptions/${provider}`, { method: 'POST' });
     const data = await readJsonResponse(response);
     if (!response.ok) throw new Error(data.error || 'Comparison failed.');
-    comparisonMessage.textContent = `Comparison complete for ${data.responses} response${data.responses === 1 ? '' : 's'} (${data.errors} provider error${data.errors === 1 ? '' : 's'}).`;
+    comparisonMessage.textContent = `${provider[0].toUpperCase() + provider.slice(1)} comparison complete for ${data.responses} response${data.responses === 1 ? '' : 's'} (${data.errors} error${data.errors === 1 ? '' : 's'}).`;
     comparisonMessage.className = `status-text ${data.errors ? 'error' : 'success'}`.trim();
     await loadMisconceptionAnalytics();
   } catch (error) {
     comparisonMessage.textContent = error.message;
     comparisonMessage.className = 'status-text error';
   } finally {
-    compareMisconceptionsBtn.disabled = false;
+    button.disabled = false;
   }
 }
 
@@ -976,9 +975,9 @@ questionTypeInput.addEventListener('change', () => {
 });
 
 refreshBtn.addEventListener('click', loadSessionData);
-if (compareMisconceptionsBtn) {
-  compareMisconceptionsBtn.addEventListener('click', runMisconceptionComparison);
-}
+compareProviderButtons.forEach((button) => {
+  button.addEventListener('click', () => runProviderComparison(button.dataset.provider, button));
+});
 
 // Answer Key Modal Event Listeners
 answerKeyForm.addEventListener('submit', saveAnswerKey);

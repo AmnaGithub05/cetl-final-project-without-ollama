@@ -642,34 +642,44 @@ STUDENT_ANSWER: {answer}"""
     return normalize_comparison_result(parse_model_json(text))
 
 
-def run_misconception_comparison(question: str, answer: str, answer_key: str | None) -> dict:
-    providers = {
+def misconception_provider_runners(question: str, answer: str, answer_key: str | None) -> dict:
+    return {
         "ollama": (lambda: slm.predict_misconception(question, answer, answer_key=answer_key))
         if slm is not None else None,
         "claude": lambda: compare_with_claude(question, answer, answer_key),
         "gemini": lambda: compare_with_gemini(question, answer, answer_key),
     }
+
+
+def run_provider_comparison(provider: str, question: str, answer: str, answer_key: str | None) -> dict:
+    runner = misconception_provider_runners(question, answer, answer_key).get(provider)
+    if runner is None:
+        return {"error_text": "This service is not available."}
+    try:
+        return normalize_comparison_result(runner())
+    except (
+        RuntimeError,
+        urllib.error.HTTPError,
+        urllib.error.URLError,
+        KeyError,
+        ValueError,
+        json.JSONDecodeError,
+        TimeoutError,
+    ) as error:
+        return {"error_text": str(error)}
+    except Exception as error:
+        print(f"Unexpected {provider} comparison error: {error}")
+        return {"error_text": "This service could not complete the request."}
+
+
+def run_misconception_comparison(question: str, answer: str, answer_key: str | None) -> dict:
+    providers = misconception_provider_runners(question, answer, answer_key)
     results = {}
     for provider, runner in providers.items():
         if runner is None:
             results[provider] = {"error_text": "This service is not available."}
             continue
-        try:
-            result = normalize_comparison_result(runner())
-            results[provider] = result
-        except (
-            RuntimeError,
-            urllib.error.HTTPError,
-            urllib.error.URLError,
-            KeyError,
-            ValueError,
-            json.JSONDecodeError,
-            TimeoutError,
-        ) as error:
-            results[provider] = {"error_text": str(error)}
-        except Exception as error:
-            print(f"Unexpected {provider} comparison error: {error}")
-            results[provider] = {"error_text": "This service could not complete the request."}
+        results[provider] = run_provider_comparison(provider, question, answer, answer_key)
     return results
 
 
@@ -1400,6 +1410,82 @@ def compare_session_misconceptions(session_code: str):
                 compared += 1
         db.commit()
     return jsonify({"message": "Model comparison completed.", "responses": len(rows), "results": compared, "errors": errors})
+
+
+@app.post("/api/instructor/sessions/<session_code>/compare-misconceptions/<provider>")
+@instructor_session_access_required
+def compare_session_misconceptions_provider(session_code: str, provider: str):
+    if provider not in {"ollama", "claude", "gemini"}:
+        return jsonify({"error": "Unsupported comparison provider."}), 400
+
+    with get_db() as db:
+        rows = db.execute(
+            """
+            SELECT r.id, r.answer, q.question_text, q.answer_key
+            FROM responses AS r
+            JOIN session_questions AS q ON q.id = r.question_id
+            WHERE r.session_code = ?
+            ORDER BY r.id ASC
+            """,
+            (session_code.upper(),),
+        ).fetchall()
+        if not rows:
+            return jsonify({"error": "There are no responses to compare yet."}), 400
+
+        compared = 0
+        errors = 0
+        comparison_cache = {}
+        model_name = {
+            "ollama": slm.model if slm else "unavailable",
+            "claude": anthropic_model,
+            "gemini": gemini_model,
+        }[provider]
+
+        for row in rows:
+            cache_key = (row["question_text"], row["answer"], row["answer_key"])
+            if cache_key not in comparison_cache:
+                comparison_cache[cache_key] = run_provider_comparison(
+                    provider, row["question_text"], row["answer"], row["answer_key"]
+                )
+            result = comparison_cache[cache_key]
+            if result.get("error_text"):
+                errors += 1
+            db.execute(
+                """
+                INSERT INTO misconception_comparisons
+                (response_id, provider, model, misconception_code, confidence_score,
+                 severity, feedback_text, error_text, compared_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(response_id, provider) DO UPDATE SET
+                    model = excluded.model,
+                    misconception_code = excluded.misconception_code,
+                    confidence_score = excluded.confidence_score,
+                    severity = excluded.severity,
+                    feedback_text = excluded.feedback_text,
+                    error_text = excluded.error_text,
+                    compared_at = excluded.compared_at
+                """,
+                (
+                    row["id"],
+                    provider,
+                    result.get("_model") or model_name,
+                    result.get("misconception_code"),
+                    result.get("confidence_score"),
+                    result.get("severity"),
+                    result.get("feedback_text"),
+                    result.get("error_text"),
+                    utc_now(),
+                ),
+            )
+            compared += 1
+        db.commit()
+    return jsonify({
+        "message": f"{provider.title()} comparison completed.",
+        "provider": provider,
+        "responses": len(rows),
+        "results": compared,
+        "errors": errors,
+    })
 
 
 @app.get("/health")
