@@ -496,7 +496,7 @@ def gemini_generate_json(prompt: str, temperature: float) -> tuple[dict, str]:
                 last_error = f"{error.code} for {model_name}: {details or error}"
                 if error.code == 400 and "responseMimeType" in generation_config:
                     continue
-                if error.code == 404:
+                if error.code in {404, 503}:
                     break
                 raise RuntimeError(f"Gemini request failed: {last_error}") from error
 
