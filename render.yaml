@@ -13,10 +13,6 @@ services:
         sync: false
       - key: GEMINI_MODEL
         value: gemini-3.6-flash
-      - key: ANTHROPIC_API_KEY
-        sync: false
-      - key: ANTHROPIC_MODEL
-        value: claude-3-5-haiku-latest
     disk:
       name: microcheck-data
       mountPath: /var/data

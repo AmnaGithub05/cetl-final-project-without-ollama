@@ -54,28 +54,23 @@ function renderModelComparison(responses) {
   const comparisonRows = (responses || []).flatMap((response) =>
     (response.comparisons || []).map((comparison) => ({ ...comparison, response })),
   );
-  const providers = ['ollama', 'claude', 'gemini'];
+  const providers = ['ollama'];
   const latestByProvider = new Map();
   comparisonRows.forEach((row) => {
     if (!latestByProvider.has(row.provider)) {
       latestByProvider.set(row.provider, row);
     }
   });
-  const labels = { ollama: 'Ollama', claude: 'Claude', gemini: 'Gemini' };
+  const labels = { ollama: 'Ollama' };
   const html = providers.map((provider) => {
     const result = latestByProvider.get(provider);
     if (!result) {
       return `<div class="comparison-result"><strong>${labels[provider]}</strong><span>Not run</span></div>`;
     }
     if (result.error_text) {
-      const rawErrorText = String(result.error_text);
-      const isGeminiQuotaError = provider === 'gemini'
-        && (/429|quota|resource_exhausted/i.test(rawErrorText));
       const errorText = provider === 'ollama'
         ? 'This service is not available.'
-        : isGeminiQuotaError
-          ? 'Gemini daily free-tier quota reached. Try again after the quota resets, or run another provider.'
-          : rawErrorText;
+        : String(result.error_text);
       return `<div class="comparison-result"><strong>${labels[provider]}</strong><span class="status-text error">${escapeHtml(errorText)}</span></div>`;
     }
     const confidence = result.confidence_score == null ? '—' : `${Math.round(result.confidence_score * 100)}%`;
@@ -599,7 +594,7 @@ async function runProviderComparison(provider, button) {
     const response = await fetch(`/api/instructor/sessions/${sessionCode}/compare-misconceptions/${provider}`, { method: 'POST' });
     const data = await readJsonResponse(response);
     if (!response.ok) throw new Error(data.error || 'Comparison failed.');
-    comparisonMessage.textContent = `${provider[0].toUpperCase() + provider.slice(1)} comparison complete for ${data.responses} response${data.responses === 1 ? '' : 's'} (${data.errors} error${data.errors === 1 ? '' : 's'}).`;
+    comparisonMessage.textContent = `Ollama comparison complete for ${data.responses} response${data.responses === 1 ? '' : 's'} (${data.errors} error${data.errors === 1 ? '' : 's'}).`;
     comparisonMessage.className = `status-text ${data.errors ? 'error' : 'success'}`.trim();
     await loadMisconceptionAnalytics();
   } catch (error) {

@@ -72,7 +72,7 @@ microcheck/
 - Gemini generates lecture questions, while a private local Ollama service detects misconceptions.
 - The default model is `llama3.2:1b`; set `OLLAMA_HOST`, `OLLAMA_MODEL`, and optionally `OLLAMA_TIMEOUT` to configure it.
 - Start Ollama separately and run `ollama pull llama3.2:1b` before using AI features. Student data is sent to the configured Ollama host only.
-- In an instructor session, use the separate **Run Ollama**, **Run Claude**, or **Run Gemini** buttons to compare submitted responses one provider at a time. Results are stored separately in SQLite, and a slow or unavailable provider does not block the others. Set `ANTHROPIC_API_KEY` and optionally `ANTHROPIC_MODEL` to enable Claude; `GEMINI_API_KEY` enables Gemini. Missing providers are reported without blocking the other models. Gemini free-tier quota errors are reported clearly and stop further Gemini requests for that run.
+- In an instructor session, use **Run Ollama** to detect misconceptions in submitted responses. Results are stored in SQLite and the analysis runs against the private local Ollama service. Gemini remains optional only for lecture-file question generation; Claude comparison has been removed.
 
 ## Permanent Deployment
 
@@ -83,7 +83,6 @@ This project is ready to deploy on Render with a persistent disk for SQLite.
 - `MICROCHECK_DB_PATH` should point to `/var/data/microcheck.db` on Render.
 - `MICROCHECK_SECRET_KEY` should be set to a strong secret in production.
 - `GEMINI_API_KEY` must be added as a secret environment variable for question generation.
-- `ANTHROPIC_API_KEY` must be added as a secret environment variable for Claude comparison.
 - The app starts with `gunicorn app:app`.
 
 ### Render flow
