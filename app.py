@@ -1381,7 +1381,6 @@ def compare_session_misconceptions_provider(session_code: str, provider: str):
         compared = 0
         errors = 0
         comparison_cache = {}
-        provider_error = None
         model_name = {
             "ollama": slm.model if slm else "unavailable",
         }[provider]
@@ -1389,16 +1388,10 @@ def compare_session_misconceptions_provider(session_code: str, provider: str):
         for row in rows:
             cache_key = (row["question_text"], row["answer"], row["answer_key"])
             if cache_key not in comparison_cache:
-                comparison_cache[cache_key] = (
-                    provider_error
-                    if provider_error is not None
-                    else run_provider_comparison(
-                        provider, row["question_text"], row["answer"], row["answer_key"]
-                    )
+                comparison_cache[cache_key] = run_provider_comparison(
+                    provider, row["question_text"], row["answer"], row["answer_key"]
                 )
             result = comparison_cache[cache_key]
-            if provider_error is None and is_non_retryable_provider_error(result):
-                provider_error = result
             if result.get("error_text"):
                 errors += 1
             db.execute(
