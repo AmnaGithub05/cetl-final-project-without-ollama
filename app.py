@@ -488,9 +488,12 @@ def gemini_generate_json(prompt: str, temperature: float) -> tuple[dict, str]:
                 method="POST",
             )
             try:
-                with urllib.request.urlopen(request, timeout=90) as response:
+                with urllib.request.urlopen(request, timeout=120) as response:
                     result = json.loads(response.read().decode("utf-8"))
                 return result, model_name
+            except TimeoutError as error:
+                last_error = f"request timed out for {model_name}: {error}"
+                break
             except urllib.error.HTTPError as error:
                 details = error.read().decode("utf-8", errors="ignore")
                 last_error = f"{error.code} for {model_name}: {details or error}"
@@ -499,6 +502,11 @@ def gemini_generate_json(prompt: str, temperature: float) -> tuple[dict, str]:
                 if error.code in {404, 503}:
                     break
                 raise RuntimeError(f"Gemini request failed: {last_error}") from error
+            except urllib.error.URLError as error:
+                if "timed out" in str(error).lower():
+                    last_error = f"request timed out for {model_name}: {error}"
+                    break
+                raise RuntimeError(f"Gemini request failed: {error}") from error
 
     raise RuntimeError(
         f"No usable Gemini model was found. Tried: {', '.join(models_to_try)}. "
