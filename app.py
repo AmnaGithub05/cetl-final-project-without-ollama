@@ -540,27 +540,13 @@ Generate exactly {max_questions} questions from this material:
     try:
         result, _ = gemini_generate_json(prompt, temperature=0.7)
         response_text = result["candidates"][0]["content"]["parts"][0]["text"].strip()
-        question_parsed = json.loads(response_text)
-        
-    except json.JSONDecodeError as e:
-        # Try to extract JSON if wrapped in text
-        try:
-            import re as re_module
-            json_match = re_module.search(r'\{.*\}', response_text, re_module.DOTALL)
-            if json_match:
-                question_parsed = json.loads(json_match.group(0))
-            else:
-                return None, f"Gemini returned invalid JSON: {str(e)}"
-        except Exception as parse_error:
-            return None, f"Failed to parse Gemini response: {parse_error}"
+        question_parsed = parse_model_json(response_text)
     except Exception as error:
         return None, f"Gemini API error: {error}"
 
     generated_questions = normalize_generated_questions(question_parsed.get("questions"), max_questions)
     if not generated_questions:
         return None, "Gemini did not return usable questions."
-
-    return generated_questions
 
     return generated_questions
 
@@ -591,10 +577,20 @@ def parse_model_json(text: str) -> dict:
     try:
         parsed = json.loads(cleaned)
     except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-        if not match:
+        decoder = json.JSONDecoder()
+        parsed = None
+        for index, character in enumerate(cleaned):
+            if character != "{":
+                continue
+            try:
+                candidate, _ = decoder.raw_decode(cleaned[index:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict):
+                parsed = candidate
+                break
+        if parsed is None:
             raise
-        parsed = json.loads(match.group(0))
     if not isinstance(parsed, dict):
         raise ValueError("Model response JSON must be an object.")
     return parsed
