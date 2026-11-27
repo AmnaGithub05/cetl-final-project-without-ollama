@@ -63,6 +63,8 @@ if gemini_client:
     print("[OK] Gemini configured for question generation")
 else:
     print("[WARN] GEMINI_API_KEY not set")
+anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
+anthropic_model = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-5-5")
 
 ADMIN_INSTRUCTOR_IDS = {"AMNA", "THANGAVAL", "HERMELA"}
 
@@ -594,10 +596,82 @@ def parse_model_json(text: str) -> dict:
     return parsed
 
 
+def compare_with_gemini(question: str, answer: str, answer_key: str | None) -> dict:
+    api_key, _ = get_gemini_config()
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not configured.")
+    prompt = f"""Analyze the student's answer for a conceptual misconception.
+Return ONLY valid JSON with exactly these fields:
+{{"misconception_code": string or null, "confidence_score": number between 0 and 1, "severity": "HIGH" or "MEDIUM" or "LOW" or null, "feedback": string}}
+Use null only when the answer is correct or has no clear conceptual error. Do not require word-for-word agreement with the answer key.
+QUESTION: {question}
+ANSWER_KEY: {answer_key or "No answer key provided"}
+STUDENT_ANSWER: {answer}"""
+    result, model_name = gemini_generate_json(prompt, temperature=0.2)
+    text = result["candidates"][0]["content"]["parts"][0]["text"]
+    parsed = normalize_comparison_result(parse_model_json(text))
+    parsed["_model"] = model_name
+    return parsed
+
+
+def compare_with_claude(question: str, answer: str, answer_key: str | None) -> dict:
+    if not anthropic_api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY is not configured.")
+    prompt = f"""Analyze the student's answer for a conceptual misconception.
+Return ONLY valid JSON with exactly these fields:
+{{"misconception_code": string or null, "confidence_score": number between 0 and 1, "severity": "HIGH" or "MEDIUM" or "LOW" or null, "feedback": string}}
+Use null only when the answer is correct or has no clear conceptual error. Do not require word-for-word agreement with the answer key.
+QUESTION: {question}
+ANSWER_KEY: {answer_key or "No answer key provided"}
+STUDENT_ANSWER: {answer}"""
+    payload = json.dumps({
+        "model": anthropic_model,
+        "max_tokens": 500,
+        "messages": [{"role": "user", "content": prompt}],
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "x-api-key": anthropic_api_key,
+            "anthropic-version": "2023-06-01",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=90) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        details = error.read().decode("utf-8", errors="replace").strip()
+        raise RuntimeError(
+            f"Claude API returned HTTP {error.code}: {details or error.reason}"
+        ) from error
+    content = result.get("content")
+    text_blocks = [
+        block["text"]
+        for block in content or []
+        if isinstance(block, dict)
+        and block.get("type") == "text"
+        and isinstance(block.get("text"), str)
+    ]
+    if not text_blocks:
+        stop_reason = result.get("stop_reason", "unknown")
+        raise RuntimeError(
+            f"Claude API response did not contain a text block (stop reason: {stop_reason})."
+        )
+    text = "\n".join(text_blocks)
+    parsed = normalize_comparison_result(parse_model_json(text))
+    parsed["_model"] = anthropic_model
+    return parsed
+
+
 def misconception_provider_runners(question: str, answer: str, answer_key: str | None) -> dict:
     return {
         "ollama": (lambda: slm.predict_misconception(question, answer, answer_key=answer_key))
         if slm is not None else None,
+        "claude": lambda: compare_with_claude(question, answer, answer_key),
+        "gemini": lambda: compare_with_gemini(question, answer, answer_key),
     }
 
 
@@ -620,6 +694,15 @@ def run_provider_comparison(provider: str, question: str, answer: str, answer_ke
     except Exception as error:
         print(f"Unexpected {provider} comparison error: {error}")
         return {"error_text": "This service could not complete the request."}
+
+
+def is_non_retryable_provider_error(result: dict) -> bool:
+    error_text = str(result.get("error_text") or "").lower()
+    return (
+        "429" in error_text
+        or "quota" in error_text
+        or "resource_exhausted" in error_text
+    )
 
 
 def run_misconception_comparison(question: str, answer: str, answer_key: str | None) -> dict:
@@ -1207,7 +1290,9 @@ def get_session_responses(session_code: str):
                 r.question_id,
                 q.question_type,
                 q.question_text,
+                sm.id AS default_private_ai_result_id,
                 sm.misconception_code,
+                sm.confidence_score AS misconception_confidence_score,
                 sm.severity as misconception_severity,
                 sm.feedback_text as misconception_feedback
             FROM responses AS r
@@ -1272,7 +1357,9 @@ def get_session_responses(session_code: str):
                     "question_id": row["question_id"],
                     "question_type": row["question_type"],
                     "question_text": row["question_text"],
+                    "has_default_private_ai_result": row["default_private_ai_result_id"] is not None,
                     "misconception_code": row["misconception_code"],
+                    "misconception_confidence_score": row["misconception_confidence_score"],
                     "misconception_severity": row["misconception_severity"],
                     "misconception_feedback": row["misconception_feedback"],
                     "comparisons": [
@@ -1361,7 +1448,7 @@ def compare_session_misconceptions(session_code: str):
 @app.post("/api/instructor/sessions/<session_code>/compare-misconceptions/<provider>")
 @instructor_session_access_required
 def compare_session_misconceptions_provider(session_code: str, provider: str):
-    if provider != "ollama":
+    if provider not in {"ollama", "claude", "gemini"}:
         return jsonify({"error": "Unsupported comparison provider."}), 400
 
     with get_db() as db:
@@ -1381,17 +1468,26 @@ def compare_session_misconceptions_provider(session_code: str, provider: str):
         compared = 0
         errors = 0
         comparison_cache = {}
+        provider_error = None
         model_name = {
             "ollama": slm.model if slm else "unavailable",
+            "claude": anthropic_model,
+            "gemini": gemini_model,
         }[provider]
 
         for row in rows:
             cache_key = (row["question_text"], row["answer"], row["answer_key"])
             if cache_key not in comparison_cache:
-                comparison_cache[cache_key] = run_provider_comparison(
-                    provider, row["question_text"], row["answer"], row["answer_key"]
+                comparison_cache[cache_key] = (
+                    provider_error
+                    if provider_error is not None
+                    else run_provider_comparison(
+                        provider, row["question_text"], row["answer"], row["answer_key"]
+                    )
                 )
             result = comparison_cache[cache_key]
+            if provider_error is None and is_non_retryable_provider_error(result):
+                provider_error = result
             if result.get("error_text"):
                 errors += 1
             db.execute(

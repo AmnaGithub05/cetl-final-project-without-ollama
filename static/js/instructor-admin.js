@@ -534,28 +534,18 @@ function renderQuestions(questions) {
 }
 
 function renderResponses(responses) {
+  if (!adminResponsesBody) {
+    renderQuestionPieCards(adminQuestionsCache, responses);
+    return;
+  }
+
   if (!responses.length) {
     adminResponsesBody.innerHTML = '<tr><td colspan="7" class="empty-state">No responses yet.</td></tr>';
     renderQuestionPieCards([], []);
     return;
   }
 
-  adminResponsesBody.innerHTML = responses
-    .map(
-      (response) => `
-        <tr>
-          <td><strong>${response.session_code}</strong></td>
-          <td>${formatQuestionType(response.question_type)}</td>
-          <td>${response.student_id}</td>
-          <td>${response.question_text || 'Question removed'}</td>
-          <td>${response.answer}</td>
-          <td>${response.justification}</td>
-          <td>${formatTime(response.submitted_at)}</td>
-        </tr>
-      `,
-    )
-    .join('');
-
+  adminResponsesBody.innerHTML = '';
   renderQuestionPieCards(adminQuestionsCache, responses);
 }
 

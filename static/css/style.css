@@ -990,6 +990,25 @@ td {
   line-height: 1.45;
 }
 
+.comparison-result-button {
+  appearance: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.comparison-result-button:hover,
+.comparison-result-button[aria-pressed="true"] {
+  border-color: var(--primary);
+}
+
+.comparison-result-button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
 @media (max-width: 760px) {
   .model-comparison-grid {
     grid-template-columns: 1fr;

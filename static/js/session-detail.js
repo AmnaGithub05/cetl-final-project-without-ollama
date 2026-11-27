@@ -49,39 +49,129 @@ let currentQuestionIdForAnswerKey = null;
 let selectedMisconceptionCode = null;
 let selectedMisconceptionQuestionId = null;
 let selectedMisconceptionScrollTop = 0;
+let selectedProviderComparison = null;
 
 function renderModelComparison(responses) {
   const comparisonRows = (responses || []).flatMap((response) =>
     (response.comparisons || []).map((comparison) => ({ ...comparison, response })),
   );
-  const providers = ['ollama'];
+  const providers = ['ollama', 'claude', 'gemini'];
   const latestByProvider = new Map();
   comparisonRows.forEach((row) => {
     if (!latestByProvider.has(row.provider)) {
       latestByProvider.set(row.provider, row);
     }
   });
-  const labels = { ollama: 'Ollama' };
-  const html = providers.map((provider) => {
+  const defaultPrivateResult = (responses || []).find((response) =>
+    response.has_default_private_ai_result,
+  );
+  if (!latestByProvider.has('ollama') && defaultPrivateResult) {
+    latestByProvider.set('ollama', {
+      misconception_code: defaultPrivateResult.misconception_code,
+      confidence_score: defaultPrivateResult.misconception_confidence_score,
+      severity: defaultPrivateResult.misconception_severity,
+      feedback_text: defaultPrivateResult.misconception_feedback,
+    });
+  }
+  const labels = { ollama: 'Default Private AI', claude: 'Claude', gemini: 'Gemini' };
+  const providerCards = providers.map((provider) => {
     const result = latestByProvider.get(provider);
+    const renderCard = (content, clickable = false) => {
+      if (clickable && result.response) {
+        const isSelected = selectedProviderComparison
+          && selectedProviderComparison.provider === provider
+          && selectedProviderComparison.responseId === String(result.response.id);
+        return `<button type="button" class="comparison-result comparison-result-button" data-comparison-provider="${provider}" data-response-id="${result.response.id}" aria-pressed="${Boolean(isSelected)}">${content}</button>`;
+      }
+      return `<div class="comparison-result">${content}</div>`;
+    };
     if (!result) {
-      return `<div class="comparison-result"><strong>${labels[provider]}</strong><span>Not run</span></div>`;
+      return renderCard(`<strong>${labels[provider]}</strong><span>Not run</span>`);
     }
     if (result.error_text) {
+      const rawErrorText = String(result.error_text);
+      const isGeminiQuotaError = provider === 'gemini'
+        && (/429|quota|resource_exhausted/i.test(rawErrorText));
       const errorText = provider === 'ollama'
         ? 'This service is not available.'
-        : String(result.error_text);
-      return `<div class="comparison-result"><strong>${labels[provider]}</strong><span class="status-text error">${escapeHtml(errorText)}</span></div>`;
+        : isGeminiQuotaError
+          ? 'Gemini daily free-tier quota reached. Try again after the quota resets, or run another provider.'
+          : rawErrorText;
+      return renderCard(`<strong>${labels[provider]}</strong><span class="status-text error">${escapeHtml(errorText)}</span>`);
     }
     const confidence = result.confidence_score == null ? '—' : `${Math.round(result.confidence_score * 100)}%`;
-    return `<div class="comparison-result"><strong>${labels[provider]}</strong><span>${escapeHtml(result.misconception_code || 'No misconception')}</span><small>${escapeHtml(result.severity || '—')} · ${confidence}</small><p>${escapeHtml(result.feedback_text || '')}</p></div>`;
-  }).join('');
+    const content = `<strong>${labels[provider]}</strong><span>${escapeHtml(result.misconception_code || 'No misconception')}</span><small>${escapeHtml(result.severity || '—')} · ${confidence}</small><p>${escapeHtml(result.feedback_text || '')}</p>`;
+    return renderCard(content, ['claude', 'gemini'].includes(provider));
+  });
+  providerCards.push(
+    `<div id="misconception-details" class="misconception-details" aria-live="polite">
+      <p class="empty-state">Select a misconception code or heatmap cell to inspect the default private AI's findings.</p>
+    </div>`,
+  );
   const comparisonPanel = document.createElement('div');
   comparisonPanel.className = 'model-comparison-grid';
-  comparisonPanel.innerHTML = html;
+  comparisonPanel.innerHTML = providerCards.join('');
   const oldPanel = misconceptionAnalytics.querySelector('.model-comparison-grid');
   if (oldPanel) oldPanel.remove();
   misconceptionAnalytics.prepend(comparisonPanel);
+  comparisonPanel.querySelectorAll('.comparison-result-button').forEach((button) => {
+    button.addEventListener('click', () => {
+      const provider = button.dataset.comparisonProvider;
+      const result = comparisonRows.find((row) =>
+        row.provider === provider
+        && String(row.response.id) === button.dataset.responseId,
+      );
+      if (!result) return;
+      selectedProviderComparison = {
+        provider,
+        responseId: String(result.response.id),
+      };
+      selectedMisconceptionCode = null;
+      selectedMisconceptionQuestionId = null;
+      renderProviderDetails(provider, result);
+    });
+  });
+  if (selectedProviderComparison) {
+    const selectedResult = comparisonRows.find((row) =>
+      row.provider === selectedProviderComparison.provider
+      && String(row.response.id) === selectedProviderComparison.responseId,
+    );
+    if (selectedResult) {
+      renderProviderDetails(selectedProviderComparison.provider, selectedResult, false);
+    } else {
+      selectedProviderComparison = null;
+    }
+  }
+}
+
+function renderProviderDetails(provider, result, shouldScroll = true) {
+  const details = misconceptionAnalytics.querySelector('#misconception-details');
+  const response = result.response;
+  if (!details || !response) return;
+  const providerName = provider === 'claude' ? 'Claude' : 'Gemini';
+  const confidence = result.confidence_score == null
+    ? '—'
+    : `${Math.round(result.confidence_score * 100)}%`;
+  details.innerHTML = `
+    <div class="misconception-details-head">
+      <div>
+        <p class="section-label">${providerName} analysis</p>
+        <h4>${escapeHtml(result.misconception_code || 'No misconception')}</h4>
+      </div>
+      <span class="severity-badge">${escapeHtml(result.severity || '—')} · ${confidence}</span>
+    </div>
+    <p class="misconception-details-count">Finding for ${escapeHtml(response.student_id)}</p>
+    <div class="misconception-response-list">
+      <article class="misconception-response">
+        <p><strong>Question:</strong> ${escapeHtml(response.question_text || 'Question removed')}</p>
+        <p><strong>Answer:</strong> ${escapeHtml(response.answer)}</p>
+        <p class="misconception-feedback">${escapeHtml(result.feedback_text || 'No additional feedback was provided.')}</p>
+      </article>
+    </div>
+  `;
+  if (shouldScroll) {
+    details.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+  }
 }
 
 async function readJsonResponse(response) {
@@ -588,13 +678,18 @@ async function saveAnswerKey(event) {
 // Misconception Analytics Functions
 async function runProviderComparison(provider, button) {
   button.disabled = true;
-  comparisonMessage.textContent = `Running ${provider} misconception detection. This can take a moment...`;
+  const providerLabel = {
+    ollama: 'Default Private AI',
+    claude: 'Claude',
+    gemini: 'Gemini',
+  }[provider] || provider;
+  comparisonMessage.textContent = `Running ${providerLabel} misconception detection. This can take a moment...`;
   comparisonMessage.className = 'status-text';
   try {
     const response = await fetch(`/api/instructor/sessions/${sessionCode}/compare-misconceptions/${provider}`, { method: 'POST' });
     const data = await readJsonResponse(response);
     if (!response.ok) throw new Error(data.error || 'Comparison failed.');
-    comparisonMessage.textContent = `Ollama comparison complete for ${data.responses} response${data.responses === 1 ? '' : 's'} (${data.errors} error${data.errors === 1 ? '' : 's'}).`;
+    comparisonMessage.textContent = `${providerLabel} comparison complete for ${data.responses} response${data.responses === 1 ? '' : 's'} (${data.errors} error${data.errors === 1 ? '' : 's'}).`;
     comparisonMessage.className = `status-text ${data.errors ? 'error' : 'success'}`.trim();
     await loadMisconceptionAnalytics();
   } catch (error) {
@@ -706,9 +801,6 @@ async function loadMisconceptionAnalytics() {
           </tbody>
         </table>
       </div>
-      <div id="misconception-details" class="misconception-details" aria-live="polite">
-        <p class="empty-state">Select a misconception code or heatmap cell to inspect Ollama's findings.</p>
-      </div>
     `;
 
     misconceptionAnalytics.innerHTML = html;
@@ -717,6 +809,7 @@ async function loadMisconceptionAnalytics() {
       const showDetails = (shouldScroll = true) => {
         const selectedCode = button.dataset.misconceptionCode;
         const selectedQuestionId = button.dataset.questionId;
+        selectedProviderComparison = null;
         selectedMisconceptionCode = selectedCode;
         selectedMisconceptionQuestionId = selectedQuestionId || null;
         const selected = selectedCode === '__all__'
